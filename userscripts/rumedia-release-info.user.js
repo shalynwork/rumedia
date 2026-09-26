@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.0.1
+// @version      8.1.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -69,8 +69,23 @@
 
         const releaseDate = doc.querySelector('input#tags')?.value?.trim() || '';
         const apple = parseAppleDelivery(doc);
+        const artistList = parseArtistList(doc);
 
-        return { producer, written, vocal, age, lyrics, aiComment, aiArtwork, releaseDate, apple };
+        return { producer, written, vocal, age, lyrics, aiComment, aiArtwork, releaseDate, apple, artistList };
+    }
+
+    // Список артистов со страницы редактирования: [{ name, feat }]. feat — включён переключатель «feat.».
+    function parseArtistList(doc) {
+        return Array.from(doc.querySelectorAll('#artists_list li.playlist-list-song'))
+            .map((li) => {
+                const name = (li.querySelector('#artist_naming, .art_details h4')?.textContent || '').trim();
+                const box = li.querySelector('.check input[type="checkbox"]');
+                const feat =
+                    (box ? box.hasAttribute('checked') : false) ||
+                    /feat/i.test(li.querySelector('.duration')?.textContent || '');
+                return { name, feat };
+            })
+            .filter((a) => a.name);
     }
 
     // «Доставка на площадки» → галочка Apple. null — если блока на странице нет.
@@ -102,10 +117,11 @@
         const written = doc.querySelector('input#written')?.value?.trim() || '';
         const releaseDate = doc.querySelector('input#description')?.value?.trim() || '';
         const apple = parseAppleDelivery(doc);
+        const artistList = parseArtistList(doc);
         const tracks = parseTrackBlocks(doc);
         const trackCount = tracks.length || doc.querySelectorAll('#songs .uploaded_albm_slist').length || null;
 
-        return { aiUsed, artists, written, releaseDate, apple, trackCount, tracks };
+        return { aiUsed, artists, artistList, written, releaseDate, apple, trackCount, tracks };
     }
 
     function parseTrackBlocks(doc) {
@@ -367,6 +383,16 @@
         return escapeHtml(v);
     }
 
+    // «Артисты»: основные через запятую, фиты — после бейджа feat. Без списка — обычный текст.
+    function artistsFieldHtml(list, fallback) {
+        if (!Array.isArray(list) || !list.length) return fieldOrMissing(fallback, 'не указаны');
+        const main = list.filter((a) => !a.feat).map((a) => escapeHtml(a.name));
+        const feats = list.filter((a) => a.feat).map((a) => escapeHtml(a.name));
+        if (!feats.length) return main.join(', ');
+        const featHtml = `<span class="rm-feat" title="Включён переключатель feat.">feat.</span><span class="rm-feat-names">${feats.join(', ')}</span>`;
+        return `<span class="rm-artists">${main.length ? `<span>${main.join(', ')}</span>` : ''}${featHtml}</span>`;
+    }
+
     /* ---------- проверка формата «Автор» / «Продюсер» (Имя Фамилия / Имя Отчество Фамилия) ---------- */
 
     const COMMON_FIRST_NAMES = new Set(
@@ -428,7 +454,7 @@
             `<div class="rai-field"><div class="rai-label">${label}</div><div class="rai-value">${value}</div></div>`;
 
         return `<div class="release-album-info">
-                ${field('Артисты', fieldOrMissing(info.artists, 'не указаны'))}
+                ${field('Артисты', artistsFieldHtml(info.artistList, info.artists))}
                 ${field('Автор', authorFieldHtml(info.written, 'не указан'))}
                 ${field('Apple', buildAiBadge(info.apple))}
                 ${field('Дата релиза', fieldOrMissing(info.releaseDate, 'не указана'))}
@@ -942,7 +968,7 @@
         const written = details.written && details.written !== '—' ? details.written : row.dataset.rmAuthor;
 
         return `<div class="release-inline-details release-album-info">
-                ${field('Артисты', fieldOrMissing(row.dataset.rmArtists, 'не указаны'))}
+                ${field('Артисты', artistsFieldHtml(details.artistList, row.dataset.rmArtists))}
                 ${field('Автор', authorFieldHtml(written, 'не указан'))}
                 ${field('Продюсер', authorFieldHtml(details.producer, 'не указан'))}
                 ${field('Вокал', escapeHtml(details.vocal || '—'))}
@@ -1888,6 +1914,10 @@
             color:var(--rm-subtle); white-space:nowrap; }
         .rai-value { font-size:14px; font-weight:500; color:var(--rm-fg); line-height:1.4; }
         .rai-value svg { vertical-align:-2px; }
+        .rm-artists { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 7px; }
+        .rm-feat { display:inline-flex; align-items:center; height:20px; padding:0 7px; border-radius:var(--rm-radius-sm);
+            border:1px solid #bfdbfe; background:#eff6ff; color:#1d4ed8; font-size:11.5px; font-weight:600; letter-spacing:.01em; cursor:help; }
+        .rm-feat-names { color:#1d4ed8; }
         .rm-author { display:inline-flex; align-items:center; gap:5px; color:#92400e; }
         .rm-author-warn { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:50%;
             background:#fef3c7; color:#b45309; font-size:11px; font-weight:700; cursor:help; }
