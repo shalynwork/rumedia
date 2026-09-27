@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.2.0
+// @version      8.2.1
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -422,8 +422,8 @@
         if (words.some((w) => !/^[A-ZА-ЯЁ][a-zа-яё]*(?:[-'’][A-ZА-ЯЁa-zа-яё][a-zа-яё]*)*$/.test(w))) return 'регистр: каждое слово с заглавной, остальные строчные';
         // Отчество последним — порядок неверный, подсказываем, как именно перепутано.
         if (words.length === 3 && PATRONYMIC_RE.test(low[2]) && !PATRONYMIC_RE.test(low[1])) {
-            if (COMMON_FIRST_NAMES.has(low[0])) return 'порядок: Имя Фамилия Отчество — нужно Имя Отчество Фамилия';
-            if (COMMON_FIRST_NAMES.has(low[1])) return 'порядок: Фамилия Имя Отчество — нужно Имя Отчество Фамилия';
+            if (COMMON_FIRST_NAMES.has(low[0])) return 'порядок: Имя Фамилия Отчество';
+            if (COMMON_FIRST_NAMES.has(low[1])) return 'порядок: Фамилия Имя Отчество';
             return 'отчество должно стоять вторым: Имя Отчество Фамилия';
         }
         if (words.length === 3 && /[а-яё]/.test(low[1]) && !PATRONYMIC_RE.test(low[1])) return 'в середине ожидается отчество';
@@ -539,18 +539,13 @@
             .rm-pl-vol-menu { width:180px; padding:6px 10px 12px; }
             .rm-pl-vol-menu .rm-pl-menu-title { display:flex; justify-content:space-between; padding:4px 0 10px; }
             .rm-pl-vol-val { font-variant-numeric:tabular-nums; color:var(--rm-fg); letter-spacing:0; }
-            .rm-pl-vol-range { -webkit-appearance:none; appearance:none; display:block; width:100%; height:16px; margin:0;
-                background:transparent; cursor:pointer; }
-            .rm-pl-vol-range::-webkit-slider-runnable-track { height:6px; border-radius:999px;
-                background:linear-gradient(to right, var(--rm-primary) var(--val, 100%), var(--rm-muted-strong) var(--val, 100%)); }
-            .rm-pl-vol-range::-moz-range-track { height:6px; border-radius:999px; background:var(--rm-muted-strong); }
-            .rm-pl-vol-range::-moz-range-progress { height:6px; border-radius:999px; background:var(--rm-primary); }
-            .rm-pl-vol-range::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; margin-top:-5px; border-radius:50%;
-                background:#fff; border:1px solid var(--rm-primary); box-shadow:var(--rm-shadow-sm); }
-            .rm-pl-vol-range::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#fff;
-                border:1px solid var(--rm-primary); box-shadow:var(--rm-shadow-sm); }
-            .rm-pl-vol-range:focus-visible { outline:none; }
-            .rm-pl-vol-range:focus-visible::-webkit-slider-thumb { box-shadow:var(--rm-ring-shadow); }
+            .rm-pl-vol-slider { position:relative; height:18px; display:flex; align-items:center; cursor:pointer;
+                touch-action:none; outline:none; }
+            .rm-pl-vol-rail { position:relative; width:100%; height:6px; border-radius:999px; background:var(--rm-muted-strong); overflow:hidden; }
+            .rm-pl-vol-fill { position:absolute; left:0; top:0; bottom:0; border-radius:inherit; background:var(--rm-primary); }
+            .rm-pl-vol-thumb { position:absolute; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%;
+                background:#fff; border:1px solid var(--rm-primary); box-shadow:var(--rm-shadow-sm); pointer-events:none; }
+            .rm-pl-vol-slider:focus-visible .rm-pl-vol-thumb { box-shadow:var(--rm-ring-shadow); }
             .rm-pl-menu { position:absolute; right:0; bottom:calc(100% + 8px); z-index:30; min-width:96px; padding:4px;
                 border:1px solid var(--rm-border); border-radius:10px; background:#fff; box-shadow:0 8px 24px rgba(17,24,39,.14); }
             .rm-pl-menu[hidden] { display:none; }
@@ -624,7 +619,10 @@
                 <button type="button" class="rm-pl-btn rm-pl-vol" title="Громкость" aria-haspopup="true" aria-expanded="false">${PLAYER_ICONS.sound}</button>
                 <div class="rm-pl-menu rm-pl-vol-menu" hidden>
                     <div class="rm-pl-menu-title">Громкость <span class="rm-pl-vol-val">100%</span></div>
-                    <input type="range" class="rm-pl-vol-range" min="0" max="100" step="1" value="100" aria-label="Громкость">
+                    <div class="rm-pl-vol-slider" role="slider" tabindex="0" aria-label="Громкость" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+                        <div class="rm-pl-vol-rail"><div class="rm-pl-vol-fill"></div></div>
+                        <div class="rm-pl-vol-thumb"></div>
+                    </div>
                 </div>
             </div>`;
         audio.replaceWith(player);
@@ -642,7 +640,9 @@
         const speedMenu = q('.rm-pl-speed-wrap .rm-pl-menu');
         const volBtn = q('.rm-pl-vol');
         const volMenu = q('.rm-pl-vol-menu');
-        const volRange = q('.rm-pl-vol-range');
+        const volSlider = q('.rm-pl-vol-slider');
+        const volFill = q('.rm-pl-vol-fill');
+        const volThumb = q('.rm-pl-vol-thumb');
         const volVal = q('.rm-pl-vol-val');
         let seeking = false;
         let pendingRatio = null; // перемотка до загрузки длительности
@@ -786,13 +786,49 @@
         };
         function syncVolume() {
             const pct = Math.round((audio.muted ? 0 : audio.volume) * 100);
-            volRange.value = String(pct);
-            volRange.style.setProperty('--val', `${pct}%`);
+            volFill.style.width = `${pct}%`;
+            volThumb.style.left = `${pct}%`;
+            volSlider.setAttribute('aria-valuenow', String(pct));
             volVal.textContent = `${pct}%`;
             volBtn.innerHTML = pct === 0 ? PLAYER_ICONS.muted : pct < 50 ? PLAYER_ICONS.soundLow : PLAYER_ICONS.sound;
             volBtn.title = `Громкость: ${pct}%`;
         }
-        volRange.addEventListener('input', () => setVolume(Number(volRange.value) / 100));
+        // Свой ползунок (как полоса перемотки): стандартный range в Firefox внутри плеера не перетаскивается.
+        let volDragging = false;
+        const volFromEvent = (e) => {
+            const r = volSlider.getBoundingClientRect();
+            return r.width ? (e.clientX - r.left) / r.width : 0;
+        };
+        volSlider.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            volDragging = true;
+            try {
+                volSlider.setPointerCapture(e.pointerId);
+            } catch (_) {
+                /* без захвата тоже работает, просто хуже при уводе мыши */
+            }
+            volSlider.focus();
+            setVolume(volFromEvent(e));
+        });
+        volSlider.addEventListener('pointermove', (e) => {
+            if (volDragging) setVolume(volFromEvent(e));
+        });
+        const endVolDrag = () => {
+            volDragging = false;
+        };
+        volSlider.addEventListener('pointerup', endVolDrag);
+        volSlider.addEventListener('pointercancel', endVolDrag);
+        volSlider.addEventListener('keydown', (e) => {
+            const step = { ArrowRight: 0.05, ArrowUp: 0.05, ArrowLeft: -0.05, ArrowDown: -0.05 }[e.key];
+            if (step) {
+                e.preventDefault();
+                setVolume(audio.volume + step);
+            } else if (e.key === 'Home' || e.key === 'End') {
+                e.preventDefault();
+                setVolume(e.key === 'End' ? 1 : 0);
+            }
+        });
         volBtn.addEventListener('wheel', (e) => {
             e.preventDefault();
             setVolume(audio.volume + (e.deltaY < 0 ? 0.05 : -0.05));
@@ -806,6 +842,8 @@
         });
         audio.addEventListener('volumechange', syncVolume);
         audio.addEventListener('play', () => {
+            const saved = loadPlayerVolume();
+            if (saved != null && Math.abs(audio.volume - saved) > 0.001) audio.volume = saved;
             // одновременно играет только один трек
             document.querySelectorAll('audio').forEach((other) => {
                 if (other !== audio && !other.paused) other.pause();
