@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.1.0
+// @version      8.2.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -420,8 +420,11 @@
         if (words.length > 3) return 'больше трёх слов';
         if (/[а-яё]/i.test(name) && /[a-z]/i.test(name)) return 'смешаны кириллица и латиница';
         if (words.some((w) => !/^[A-ZА-ЯЁ][a-zа-яё]*(?:[-'’][A-ZА-ЯЁa-zа-яё][a-zа-яё]*)*$/.test(w))) return 'регистр: каждое слово с заглавной, остальные строчные';
+        // Отчество последним — порядок неверный, подсказываем, как именно перепутано.
         if (words.length === 3 && PATRONYMIC_RE.test(low[2]) && !PATRONYMIC_RE.test(low[1])) {
-            return 'порядок: похоже на Фамилия Имя Отчество';
+            if (COMMON_FIRST_NAMES.has(low[0])) return 'порядок: Имя Фамилия Отчество — нужно Имя Отчество Фамилия';
+            if (COMMON_FIRST_NAMES.has(low[1])) return 'порядок: Фамилия Имя Отчество — нужно Имя Отчество Фамилия';
+            return 'отчество должно стоять вторым: Имя Отчество Фамилия';
         }
         if (words.length === 3 && /[а-яё]/.test(low[1]) && !PATRONYMIC_RE.test(low[1])) return 'в середине ожидается отчество';
         if (!COMMON_FIRST_NAMES.has(low[0]) && COMMON_FIRST_NAMES.has(low[1])) return 'порядок: похоже на Фамилия Имя';
@@ -494,6 +497,7 @@
         play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
         pause: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
         sound: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+        soundLow: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>',
         muted: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor"/><path d="m16 9 6 6M22 9l-6 6"/></svg>',
     };
 
@@ -531,7 +535,22 @@
                 color:var(--rm-muted-fg); cursor:pointer; }
             .rm-pl-btn:hover { background:var(--rm-accent); color:var(--rm-fg); }
             .rm-pl-speed.is-changed { color:var(--rm-link); }
-            .rm-pl-speed-wrap { position:relative; flex:none; }
+            .rm-pl-speed-wrap, .rm-pl-vol-wrap { position:relative; flex:none; }
+            .rm-pl-vol-menu { width:180px; padding:6px 10px 12px; }
+            .rm-pl-vol-menu .rm-pl-menu-title { display:flex; justify-content:space-between; padding:4px 0 10px; }
+            .rm-pl-vol-val { font-variant-numeric:tabular-nums; color:var(--rm-fg); letter-spacing:0; }
+            .rm-pl-vol-range { -webkit-appearance:none; appearance:none; display:block; width:100%; height:16px; margin:0;
+                background:transparent; cursor:pointer; }
+            .rm-pl-vol-range::-webkit-slider-runnable-track { height:6px; border-radius:999px;
+                background:linear-gradient(to right, var(--rm-primary) var(--val, 100%), var(--rm-muted-strong) var(--val, 100%)); }
+            .rm-pl-vol-range::-moz-range-track { height:6px; border-radius:999px; background:var(--rm-muted-strong); }
+            .rm-pl-vol-range::-moz-range-progress { height:6px; border-radius:999px; background:var(--rm-primary); }
+            .rm-pl-vol-range::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; margin-top:-5px; border-radius:50%;
+                background:#fff; border:1px solid var(--rm-primary); box-shadow:var(--rm-shadow-sm); }
+            .rm-pl-vol-range::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#fff;
+                border:1px solid var(--rm-primary); box-shadow:var(--rm-shadow-sm); }
+            .rm-pl-vol-range:focus-visible { outline:none; }
+            .rm-pl-vol-range:focus-visible::-webkit-slider-thumb { box-shadow:var(--rm-ring-shadow); }
             .rm-pl-menu { position:absolute; right:0; bottom:calc(100% + 8px); z-index:30; min-width:96px; padding:4px;
                 border:1px solid var(--rm-border); border-radius:10px; background:#fff; box-shadow:0 8px 24px rgba(17,24,39,.14); }
             .rm-pl-menu[hidden] { display:none; }
@@ -549,6 +568,25 @@
             .rm-player.is-error .rm-pl-time { color:var(--rm-destructive); }
         `;
         document.head.appendChild(style);
+    }
+
+    const PLAYER_VOLUME_KEY = 'rm-player-volume';
+
+    function loadPlayerVolume() {
+        try {
+            const v = parseFloat(localStorage.getItem(PLAYER_VOLUME_KEY));
+            return Number.isFinite(v) && v >= 0 && v <= 1 ? v : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function savePlayerVolume(v) {
+        try {
+            localStorage.setItem(PLAYER_VOLUME_KEY, String(v));
+        } catch (_) {
+            /* хранилище недоступно — просто не запоминаем */
+        }
     }
 
     function formatPlayerTime(sec) {
@@ -582,7 +620,13 @@
                     ${PLAYER_SPEEDS.map((v) => `<button type="button" data-speed="${v}">${v === 1 ? 'Обычная' : `${v}×`}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg></button>`).join('')}
                 </div>
             </div>
-            <button type="button" class="rm-pl-btn rm-pl-mute" title="Выключить звук">${PLAYER_ICONS.sound}</button>`;
+            <div class="rm-pl-vol-wrap">
+                <button type="button" class="rm-pl-btn rm-pl-vol" title="Громкость" aria-haspopup="true" aria-expanded="false">${PLAYER_ICONS.sound}</button>
+                <div class="rm-pl-menu rm-pl-vol-menu" hidden>
+                    <div class="rm-pl-menu-title">Громкость <span class="rm-pl-vol-val">100%</span></div>
+                    <input type="range" class="rm-pl-vol-range" min="0" max="100" step="1" value="100" aria-label="Громкость">
+                </div>
+            </div>`;
         audio.replaceWith(player);
         player.appendChild(audio);
 
@@ -595,8 +639,11 @@
         const buf = q('.rm-pl-buf');
         const thumb = q('.rm-pl-thumb');
         const speedBtn = q('.rm-pl-speed');
-        const speedMenu = q('.rm-pl-menu');
-        const muteBtn = q('.rm-pl-mute');
+        const speedMenu = q('.rm-pl-speed-wrap .rm-pl-menu');
+        const volBtn = q('.rm-pl-vol');
+        const volMenu = q('.rm-pl-vol-menu');
+        const volRange = q('.rm-pl-vol-range');
+        const volVal = q('.rm-pl-vol-val');
         let seeking = false;
         let pendingRatio = null; // перемотка до загрузки длительности
 
@@ -682,16 +729,22 @@
                 playBtn.click();
             }
         });
+        // Всплывающие окошки «Скорость» и «Громкость»: одно открыто за раз, закрываются кликом мимо и Esc.
+        const popups = [
+            { btn: speedBtn, menu: speedMenu, onOpen: () => syncSpeedMenu() },
+            { btn: volBtn, menu: volMenu, onOpen: () => syncVolume() },
+        ];
         const onOutside = (e) => {
-            if (!e.target.closest || !speedMenu.parentElement.contains(e.target)) closeMenu();
+            if (!popups.some((p) => p.menu.parentElement.contains(e.target))) closeMenu();
         };
         const onEsc = (e) => {
             if (e.key === 'Escape') closeMenu();
         };
         function closeMenu() {
-            if (speedMenu.hidden) return;
-            speedMenu.hidden = true;
-            speedBtn.setAttribute('aria-expanded', 'false');
+            popups.forEach((p) => {
+                p.menu.hidden = true;
+                p.btn.setAttribute('aria-expanded', 'false');
+            });
             document.removeEventListener('pointerdown', onOutside, true);
             document.removeEventListener('keydown', onEsc, true);
         }
@@ -700,16 +753,20 @@
                 b.classList.toggle('is-current', Number(b.dataset.speed) === audio.playbackRate);
             });
         };
-        speedBtn.addEventListener('click', () => {
-            if (!speedMenu.hidden) return closeMenu();
-            syncSpeedMenu();
-            speedMenu.classList.remove('is-below');
-            speedMenu.hidden = false;
-            // сверху не помещается (плеер у верхнего края экрана) — открываем вниз
-            if (speedMenu.getBoundingClientRect().top < 8) speedMenu.classList.add('is-below');
-            speedBtn.setAttribute('aria-expanded', 'true');
-            document.addEventListener('pointerdown', onOutside, true);
-            document.addEventListener('keydown', onEsc, true);
+        popups.forEach((p) => {
+            p.btn.addEventListener('click', () => {
+                const wasOpen = !p.menu.hidden;
+                closeMenu();
+                if (wasOpen) return;
+                p.onOpen();
+                p.menu.classList.remove('is-below');
+                p.menu.hidden = false;
+                // сверху не помещается (плеер у верхнего края экрана) — открываем вниз
+                if (p.menu.getBoundingClientRect().top < 8) p.menu.classList.add('is-below');
+                p.btn.setAttribute('aria-expanded', 'true');
+                document.addEventListener('pointerdown', onOutside, true);
+                document.addEventListener('keydown', onEsc, true);
+            });
         });
         speedMenu.addEventListener('click', (e) => {
             const b = e.target.closest('button[data-speed]');
@@ -717,18 +774,37 @@
             audio.playbackRate = Number(b.dataset.speed);
             closeMenu();
         });
-        muteBtn.addEventListener('click', () => {
-            audio.muted = !audio.muted;
-        });
+        // Громкость: ползунок 0–100 %, колесо мыши над кнопкой — по 5 %. Запоминается для всех плееров.
+        const setVolume = (v) => {
+            const vol = Math.max(0, Math.min(1, v));
+            audio.muted = false;
+            audio.volume = vol;
+            savePlayerVolume(vol);
+            document.querySelectorAll('.rm-player audio').forEach((other) => {
+                if (other !== audio) other.volume = vol;
+            });
+        };
+        function syncVolume() {
+            const pct = Math.round((audio.muted ? 0 : audio.volume) * 100);
+            volRange.value = String(pct);
+            volRange.style.setProperty('--val', `${pct}%`);
+            volVal.textContent = `${pct}%`;
+            volBtn.innerHTML = pct === 0 ? PLAYER_ICONS.muted : pct < 50 ? PLAYER_ICONS.soundLow : PLAYER_ICONS.sound;
+            volBtn.title = `Громкость: ${pct}%`;
+        }
+        volRange.addEventListener('input', () => setVolume(Number(volRange.value) / 100));
+        volBtn.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            setVolume(audio.volume + (e.deltaY < 0 ? 0.05 : -0.05));
+        }, { passive: false });
+        const savedVolume = loadPlayerVolume();
+        if (savedVolume != null) audio.volume = savedVolume;
 
         audio.addEventListener('ratechange', () => {
             speedBtn.textContent = `${audio.playbackRate}×`;
             speedBtn.classList.toggle('is-changed', audio.playbackRate !== 1);
         });
-        audio.addEventListener('volumechange', () => {
-            muteBtn.innerHTML = audio.muted ? PLAYER_ICONS.muted : PLAYER_ICONS.sound;
-            muteBtn.title = audio.muted ? 'Включить звук' : 'Выключить звук';
-        });
+        audio.addEventListener('volumechange', syncVolume);
         audio.addEventListener('play', () => {
             // одновременно играет только один трек
             document.querySelectorAll('audio').forEach((other) => {
@@ -759,6 +835,7 @@
         syncTime();
         syncBuffer();
         syncPlaying();
+        syncVolume();
         return player;
     }
 
