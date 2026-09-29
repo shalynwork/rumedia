@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.10.0
+// @version      8.11.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -3378,9 +3378,9 @@
         return result;
     }
 
-    // Текст сайта как есть («43 минут тому назад» — это создание релиза), а в скобках — время
-    // ПОСЛЕДНЕГО загруженного файла (обложка/аудио/треки альбома): ближе всего к отправке на модерацию,
-    // и обновляется, если артист перезалил файл после отказа. В подсказке — время каждого файла.
+    // Время ПОСЛЕДНЕГО загруженного файла (обложка/аудио/треки альбома) — ближе всего к отправке на модерацию
+    // и обновляется, если артист перезалил файл после отказа: «вчера в 14:12». В скобках — текст сайта как есть
+    // («13 часов тому назад» — это создание релиза). В подсказке — время каждого файла.
     function renderUploadTime(row, span, relative, extraAudio = []) {
         const files = releaseFilesOf(row, extraAudio);
         if (!files.length) return;
@@ -3389,8 +3389,9 @@
         const latestDay = files.reduce((a, f) => (dayNum(f) > dayNum(a) ? f : a));
         const token = String(Math.random());
         span.dataset.rmUploadToken = token;
+        const original = relative ? ` (${relative})` : '';
         if (!span.dataset.rmUploadDone) {
-            span.textContent = `${relative ? `${relative} ` : ''}(${pad(latestDay.day)}.${pad(latestDay.month)}.${latestDay.year})`;
+            span.textContent = formatDayAgo(new Date(latestDay.year, latestDay.month - 1, latestDay.day), false) + original;
         }
         findUploadTimes(files).then((times) => {
             if (span.dataset.rmUploadToken !== token) return; // уже пересчитывается с треками альбома
@@ -3398,11 +3399,24 @@
             if (!known.length) return;
             known.sort((x, y) => x.t - y.t);
             const last = known[known.length - 1];
-            span.textContent = `${relative ? `${relative} ` : ''}(${formatDateTime(last.t * 1000)})`;
+            span.textContent = formatDayAgo(new Date(last.t * 1000)) + original;
             span.dataset.rmUploadDone = '1';
             span.title = known.map((f) => `${f.kind}: ${formatDateTime(f.t * 1000)}`).join('\n') +
-                '\n\nВ скобках — последний загруженный файл (≈ отправка на модерацию).';
+                '\n\nПоказано время последнего загруженного файла (≈ отправка на модерацию). В скобках — как пишет сайт.';
         });
+    }
+
+    // «сегодня в 15:12» / «вчера в 14:12» / «3 дня назад в 12:12» / «12.09.2026 в 12:12» (старше недели).
+    // Без времени (ещё считается) — только день: «вчера».
+    function formatDayAgo(date, withTime = true) {
+        const pad = (x) => String(x).padStart(2, '0');
+        const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const days = Math.round((startOf(new Date()) - startOf(date)) / 86400000);
+        const day = days <= 0 ? 'сегодня'
+            : days === 1 ? 'вчера'
+            : days < 7 ? `${days} ${pluralize(days, ['день', 'дня', 'дней'])} назад`
+            : `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+        return withTime ? `${day} в ${pad(date.getHours())}:${pad(date.getMinutes())}` : day;
     }
 
     // Альбом: когда пришли треки со страницы редактирования — пересчитать вместе с их файлами.
