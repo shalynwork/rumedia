@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.6.1
+// @version      8.7.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -2390,8 +2390,8 @@
         .rm-ship-badge.is-warn { background:#fffbeb; color:#b45309; box-shadow:inset 0 0 0 1px #fde68a; }
         body.rm-redesign .rm-queue-card .rm-strip-text { font-weight:600; color:var(--rm-fg); }
         body.rm-redesign .rm-queue-card #queue { padding:16px 0 0 !important; }
-        .rm-ship-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-        .rm-ship-allform { margin:0 0 0 auto; display:inline-flex; }
+        .rm-ship-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+        .rm-ship-allform { margin:0; display:inline-flex; }
         body.rm-redesign .rm-queue-card #queue .rm-ship-btn { display:inline-flex; align-items:center; gap:6px; height:32px;
             box-sizing:border-box; padding:0 12px; border:1px solid var(--rm-border); border-radius:var(--rm-radius-md);
             background:var(--rm-card); box-shadow:var(--rm-shadow-xs); font:inherit; font-size:13px; font-weight:500;
@@ -2400,7 +2400,7 @@
         body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-primary { background:var(--rm-primary); border-color:var(--rm-primary);
             color:var(--rm-primary-fg) !important; }
         body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-primary:hover { background:#262626; }
-        body.rm-redesign .rm-queue-card #queue table.rm-ship-table { display:block; width:100%; margin:0 !important; border:1px solid var(--rm-border);
+        body.rm-redesign .rm-queue-card #queue table.rm-ship-table { display:block; width:100%; margin:12px 0 0 !important; border:1px solid var(--rm-border);
             border-radius:var(--rm-radius-lg); overflow:hidden; font-size:13px; background:var(--rm-card); }
         .rm-ship-table tbody { display:block; }
         .rm-ship-table tr { display:grid; grid-template-columns:170px minmax(0,1fr) auto auto; align-items:center; gap:14px;
@@ -2551,6 +2551,9 @@
         .rm-chip { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border:1px solid var(--rm-border);
             border-radius:var(--rm-radius-sm); background:var(--rm-card); font-size:12.5px; color:var(--rm-muted-fg); white-space:nowrap; }
         .rm-chip b { font-weight:600; color:var(--rm-fg); font-variant-numeric:tabular-nums; }
+        .rm-first { display:inline-flex; align-items:center; height:22px; margin-left:10px; padding:0 8px; vertical-align:3px;
+            border:1px solid #bfdbfe; border-radius:var(--rm-radius-sm); background:#eff6ff; color:#1d4ed8;
+            font-size:12px; font-weight:600; letter-spacing:0; cursor:help; }
         .rm-chip--danger { border-color:var(--rm-destructive-border); background:var(--rm-destructive-bg); color:var(--rm-destructive); }
         .rm-chip--danger b { color:var(--rm-destructive); }
         .rm-chip--warn { border-color:#fed7aa; background:#fff7ed; color:#c2410c; }
@@ -2984,7 +2987,8 @@
         setOpen(false);
 
         // --- строка действий ---
-        const launch = panel.querySelector('a[href*="queue.php"]');
+        // синглы — queue.php, альбомы — queue_album.php
+        const launch = panel.querySelector('a[href*="/media/queue"]');
         const copyLink = Array.from(panel.querySelectorAll('a[onclick]')).find((a) => /amp_open/.test(a.getAttribute('onclick')));
         const allForm = panel.querySelector('input[name="all_ready"]')?.closest('form');
         const table = panel.querySelector('table');
@@ -3005,7 +3009,8 @@
         }
 
         const ampCount = panel.querySelectorAll('.amp_open').length;
-        if (copyLink) {
+        if (copyLink && !ampCount) copyLink.remove();
+        if (copyLink && ampCount) {
             copyLink.remove();
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -3084,12 +3089,14 @@
                     cell('rm-ship-c-done', doneLink)
                 );
             });
-            if (!rows.length) {
-                const empty = document.createElement('div');
-                empty.className = 'rm-ship-empty';
-                empty.textContent = 'Очередь на отгрузку пуста';
-                table.replaceWith(empty);
-            }
+            if (!rows.length) table.remove();
+        }
+        // «Пуста» — только если и счётчик сайта 0 (у альбомов сайт список релизов не выводит вовсе).
+        if (!total && !rows.length) {
+            const empty = document.createElement('div');
+            empty.className = 'rm-ship-empty';
+            empty.textContent = 'Очередь на отгрузку пуста';
+            panel.appendChild(empty);
         }
 
         // остатки разметки сайта: <br>, пустой текст, скрытое поле копирования
@@ -3183,8 +3190,9 @@
             }
         });
 
-        if (tasksStrip) card.prepend(tasksStrip);
+        // сверху «Задачи», под ними «Отгрузка»
         if (queueStrip) card.prepend(queueStrip);
+        if (tasksStrip) card.prepend(tasksStrip);
         hideFilterCols(card);
 
         polishSongRows();
@@ -3230,6 +3238,14 @@
     // Строка «исполнитель · жанр · загружено» + статистика и рейтинг.
     // Рейтинг ПЕРЕНОСИТСЯ (не копируется): его +/- обновляют число по id="rate-…",
     // и дубль с тем же id сломал бы обновление.
+    // У артиста ещё нет отправленных релизов — вместо «Отправлено 0» пишем «Первый релиз» у названия.
+    const isFirstReleaseStat = (stat) => /^нет\s+отправлен|^отправлено:\s*0$/i.test(stat.text.replace(/!+$/, '').trim());
+
+    function markFirstRelease(row, titleEl) {
+        if (!titleEl || row.dataset.rmFirstRelease !== '1' || titleEl.querySelector('.rm-first')) return;
+        titleEl.insertAdjacentHTML('beforeend', ' <span class="rm-first" title="У артиста ещё нет отправленных релизов">Первый релиз</span>');
+    }
+
     // «Отправлено: 14» / «Нет отправленных!» / «Отклонено: 2» → бейдж «Подпись  число».
     function buildStatChip(stat) {
         const text = stat.text.replace(/!+$/, '').trim();
@@ -3274,7 +3290,8 @@
         wrap.className = 'rm-meta-wrap';
         wrap.innerHTML = `
             <div class="rm-meta">${parts.join('<span class="rm-sep">·</span>')}</div>
-            <div class="rm-stats">${a.stats.map(buildStatChip).join('')}</div>`;
+            <div class="rm-stats">${a.stats.filter((st) => !isFirstReleaseStat(st)).map(buildStatChip).join('')}</div>`;
+        row.dataset.rmFirstRelease = a.stats.some(isFirstReleaseStat) ? '1' : '';
 
         const rating = artistCell?.querySelector(':scope > span[style*="white-space"]');
         if (rating) {
@@ -3309,6 +3326,7 @@
             const title = main.querySelector(':scope > p');
             if (title) title.insertAdjacentElement('afterend', meta);
             else main.prepend(meta);
+            markFirstRelease(row, title);
         });
     }
 
@@ -3896,6 +3914,7 @@
             titleEl.className = 'rm-title';
             titleEl.textContent = title || '—';
             main.append(titleEl, meta);
+            markFirstRelease(row, titleEl);
 
             if (extras.length) {
                 const ex = document.createElement('div');
