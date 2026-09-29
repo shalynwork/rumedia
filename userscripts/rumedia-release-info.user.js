@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.3.0
+// @version      8.4.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -2385,6 +2385,43 @@
             .rm-tasks-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
         }
 
+
+        /* --- панель «Отгрузка» --- */
+        .rm-ship-badge { display:inline-flex; align-items:center; height:22px; margin-left:8px; padding:0 8px; border-radius:var(--rm-radius-sm);
+            background:var(--rm-muted); font-size:12.5px; font-weight:500; color:var(--rm-fg-soft); vertical-align:middle; }
+        .rm-ship-badge.is-warn { background:#fffbeb; color:#b45309; box-shadow:inset 0 0 0 1px #fde68a; }
+        body.rm-redesign .rm-queue-card .rm-strip-text { font-weight:600; color:var(--rm-fg); }
+        body.rm-redesign .rm-queue-card #queue { padding:16px 0 0 !important; }
+        .rm-ship-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+        .rm-ship-allform { margin:0 0 0 auto; display:inline-flex; }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn { display:inline-flex; align-items:center; gap:6px; height:32px;
+            box-sizing:border-box; padding:0 12px; border:1px solid var(--rm-border); border-radius:var(--rm-radius-md);
+            background:var(--rm-card); box-shadow:var(--rm-shadow-xs); font:inherit; font-size:13px; font-weight:500;
+            color:var(--rm-fg) !important; text-decoration:none !important; cursor:pointer; white-space:nowrap; }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn:hover { background:var(--rm-accent); }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-primary { background:var(--rm-primary); border-color:var(--rm-primary);
+            color:var(--rm-primary-fg) !important; }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-primary:hover { background:#262626; }
+        body.rm-redesign .rm-queue-card #queue table.rm-ship-table { display:block; width:100%; margin:0 !important; border:1px solid var(--rm-border);
+            border-radius:var(--rm-radius-lg); overflow:hidden; font-size:13px; background:var(--rm-card); }
+        .rm-ship-table tbody { display:block; }
+        .rm-ship-table tr { display:grid; grid-template-columns:150px minmax(0,1fr) auto auto; align-items:center; gap:14px;
+            padding:9px 12px; background:transparent !important; }
+        .rm-ship-table tr + tr { border-top:1px solid var(--rm-border-soft); }
+        .rm-ship-table tr:hover { background:var(--rm-muted-soft) !important; }
+        .rm-ship-table td { display:block; padding:0 !important; border:none !important; background:transparent !important; }
+        .rm-ship-status { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:500; color:var(--rm-success); }
+        .rm-ship-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+        .rm-ship-status.is-warn { color:#b45309; }
+        .rm-ship-kind { margin-right:8px; font-weight:500; color:var(--rm-fg); }
+        .rm-ship-id { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; color:var(--rm-muted-fg); }
+        .rm-ship-c-links { display:flex !important; gap:14px; }
+        body.rm-redesign .rm-queue-card #queue a.rm-ship-link { font-size:13px; font-weight:500; color:var(--rm-fg-soft) !important;
+            text-decoration:none !important; }
+        body.rm-redesign .rm-queue-card #queue a.rm-ship-link:hover { color:var(--rm-fg) !important; text-decoration:underline !important; }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn.rm-ship-done { height:28px; padding:0 10px; }
+        .rm-ship-empty { padding:14px 0 2px; font-size:13px; color:var(--rm-subtle); }
+
         /* =========================================================
            Тема shadcn/ui (new-york, neutral): токены + компоненты
            Button / Badge / Tabs / Input / Dialog / Card / Skeleton
@@ -2815,6 +2852,161 @@
         tabs.forEach((item) => h2.insertBefore(item.tab, anchor));
     }
 
+    /* ---------- панель «Очередь на отгрузку» ---------- */
+
+    // Шапка: «Отгрузка» + бейджи + своя кнопка Показать/Скрыть (у сайта «Открыть» только открывает).
+    // Внутри: строка действий и аккуратный список релизов со статусом. Действия сайта (Готово, Все готовы,
+    // запуск отгрузки) не переписываем — используем его же ссылки и форму.
+    function enhanceShipQueue(h2, panel) {
+        if (!h2 || !panel || panel.dataset.rmShip) return;
+        panel.dataset.rmShip = '1';
+
+        const label = h2.querySelector(':scope > .rm-strip-text');
+        const text = (label?.textContent || '').replace(/\s+/g, ' ');
+        const total = Number((text.match(/отгрузку\s+(\d+)/i) || [])[1] || 0);
+        const review = Number((text.match(/(\d+)\s+нужда/i) || [])[1] || 0);
+
+        h2.querySelectorAll(':scope > a').forEach((a) => {
+            if (/#queue/.test(a.getAttribute('onclick') || '')) a.remove();
+        });
+        if (label) {
+            label.innerHTML = `Отгрузка
+                <span class="rm-ship-badge">${total} ${pluralize(total, ['релиз', 'релиза', 'релизов'])}</span>
+                ${review ? `<span class="rm-ship-badge is-warn">${review} на проверке</span>` : ''}`;
+        }
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'rm-task-tab rm-ship-toggle';
+        toggle.setAttribute('aria-expanded', 'false');
+        const setOpen = (open) => {
+            panel.style.display = open ? '' : 'none';
+            toggle.classList.toggle('is-open', open);
+            toggle.setAttribute('aria-expanded', String(open));
+            toggle.innerHTML = `${open ? 'Скрыть' : 'Показать'}${CHEVRON_DOWN}`;
+        };
+        toggle.addEventListener('click', () => setOpen(panel.style.display === 'none'));
+        label ? label.after(toggle) : h2.prepend(toggle);
+        setOpen(false);
+
+        // --- строка действий ---
+        const launch = panel.querySelector('a[href*="queue.php"]');
+        const copyLink = Array.from(panel.querySelectorAll('a[onclick]')).find((a) => /amp_open/.test(a.getAttribute('onclick')));
+        const allForm = panel.querySelector('input[name="all_ready"]')?.closest('form');
+        const table = panel.querySelector('table');
+        const rows = table ? Array.from(table.querySelectorAll('tr')) : [];
+
+        const bar = document.createElement('div');
+        bar.className = 'rm-ship-bar';
+
+        if (launch) {
+            const a = document.createElement('a');
+            a.className = 'rm-ship-btn is-primary';
+            a.href = launch.href;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = `Запустить отгрузку · ${total}`;
+            bar.appendChild(a);
+            launch.remove();
+        }
+
+        const ampCount = panel.querySelectorAll('.amp_open').length;
+        if (copyLink) {
+            copyLink.remove();
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'rm-ship-btn';
+            btn.textContent = `Скопировать ссылки Ampsuite · ${ampCount}`;
+            btn.addEventListener('click', async () => {
+                const links = Array.from(panel.querySelectorAll('.amp_open')).map((a) => a.href).join('\n');
+                try {
+                    await navigator.clipboard.writeText(links);
+                } catch (_) {
+                    const ta = document.createElement('textarea');
+                    ta.value = links;
+                    ta.style.cssText = 'position:fixed; opacity:0;';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                }
+                const old = btn.textContent;
+                btn.textContent = 'Скопировано ✓';
+                setTimeout(() => (btn.textContent = old), 1500);
+            });
+            bar.appendChild(btn);
+        }
+
+        const okRows = rows.filter((tr) => /✓/.test(tr.querySelector('td:nth-child(2)')?.textContent || ''));
+        if (allForm) {
+            const submit = allForm.querySelector('input[name="all_ready"]');
+            submit.value = `Готово для всех без ошибок · ${okRows.length}`;
+            submit.title = 'Отмечает «Готово» все релизы с ✓ — они уйдут из этой очереди. Релизы с ошибкой останутся.';
+            submit.className = 'rm-ship-btn';
+            allForm.classList.add('rm-ship-allform');
+            allForm.addEventListener('submit', (e) => {
+                const n = okRows.length;
+                if (!confirm(`Отметить «Готово» ${n} ${pluralize(n, ['релиз', 'релиза', 'релизов'])} без ошибок? Они уйдут из очереди на отгрузку.`)) {
+                    e.preventDefault();
+                }
+            });
+            bar.appendChild(allForm);
+        }
+
+        // --- список релизов ---
+        if (table) {
+            table.className = 'rm-ship-table';
+            rows.forEach((tr) => {
+                const tds = tr.querySelectorAll('td');
+                const releaseLink = tds[0]?.querySelector('a');
+                const ampLink = tds[1]?.querySelector('a');
+                const doneLink = tds[2]?.querySelector('a');
+                const href = releaseLink?.getAttribute('href') || '';
+                const kind = /edit-album/.test(href) ? 'Альбом' : 'Сингл';
+                const id = href.split('/').pop() || '';
+                const statusText = ((tds[1]?.textContent || '').replace(ampLink?.textContent || '', '')).replace(/\s+/g, ' ').trim();
+                const ok = statusText === '✓' || statusText === '';
+
+                const cell = (cls, ...nodes) => {
+                    const td = document.createElement('td');
+                    td.className = cls;
+                    nodes.filter(Boolean).forEach((n) => td.append(n));
+                    return td;
+                };
+                const status = document.createElement('span');
+                status.className = `rm-ship-status${ok ? '' : ' is-warn'}`;
+                status.textContent = ok ? 'Без ошибок' : statusText.replace(/^[✓✗✕×]\s*/, '') || 'Нужна проверка';
+                const main = document.createElement('span');
+                main.innerHTML = `<span class="rm-ship-kind">${kind}</span><span class="rm-ship-id">${escapeHtml(id)}</span>`;
+                if (releaseLink) { releaseLink.className = 'rm-ship-link'; releaseLink.textContent = 'Релиз ↗'; }
+                if (ampLink) { ampLink.classList.add('rm-ship-link'); ampLink.textContent = 'Ampsuite ↗'; }
+                if (doneLink) { doneLink.className = 'rm-ship-btn rm-ship-done'; doneLink.textContent = 'Готово'; doneLink.setAttribute('role', 'button'); }
+
+                tr.replaceChildren(
+                    cell('rm-ship-c-status', status),
+                    cell('rm-ship-c-main', main),
+                    cell('rm-ship-c-links', releaseLink, ampLink),
+                    cell('rm-ship-c-done', doneLink)
+                );
+            });
+            if (!rows.length) {
+                const empty = document.createElement('div');
+                empty.className = 'rm-ship-empty';
+                empty.textContent = 'Очередь на отгрузку пуста';
+                table.replaceWith(empty);
+            }
+        }
+
+        // остатки разметки сайта: <br>, пустой текст, скрытое поле копирования
+        Array.from(panel.childNodes).forEach((n) => {
+            if (n.nodeType === 3 || n.nodeType === 8 || (n.nodeType === 1 && (n.tagName === 'BR' || n.id === 'text_copy'))) {
+                if (n.id === 'text_copy') n.style.display = 'none';
+                else n.remove();
+            }
+        });
+        panel.prepend(bar);
+    }
+
     function applyAlbumsRedesign() {
         if (!isAlbumsListPage() || document.body.classList.contains('rm-redesign')) return;
 
@@ -2829,6 +3021,7 @@
         const queueH2 = queueCard?.querySelector('.header h2');
         wrapStripText(queueH2);
         queueH2?.appendChild(buildQueueSwitch('https://rumedia.io/media/admin-cp/manage-albums'));
+        enhanceShipQueue(queueH2, document.getElementById('queue'));
 
         const listCard = document.querySelector('.table-responsive1')?.closest('.card');
         listCard?.classList.add('rm-list-card');
@@ -2863,6 +3056,7 @@
             const h2 = queueHeader.querySelector('h2');
             wrapStripText(h2);
             h2?.appendChild(buildQueueSwitch('https://rumedia.io/media/admin-cp/manage-songs'));
+            enhanceShipQueue(h2, document.getElementById('queue'));
             queueStrip = makeStrip(queueHeader, document.getElementById('queue'));
         }
 
