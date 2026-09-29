@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.7.0
+// @version      8.8.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -3270,6 +3270,29 @@
             <span class="rm-chip-label">${escapeHtml(label)}</span>${num !== '' ? `<b>${escapeHtml(num)}</b>` : ''}</span>`;
     }
 
+    // Полная дата загрузки. Сайт показывает только «2 дней тому назад», но в пути файла она есть:
+    // upload/audio/2026/09/<ключ>_24_<md5>… — год и месяц в папках, число — в имени (день загрузки).
+    // Берём аудио (синглы), иначе обложку (альбомы). Если по «N часов/минут назад» можно — добавляем время.
+    function uploadDateOf(row, relative) {
+        const src = row.querySelector('audio source[src], audio[src]')?.getAttribute('src') ||
+            row.querySelector('td:nth-child(2) img')?.getAttribute('src') || '';
+        const m = src.match(/\/upload\/(?:audio|photos|videos)\/(\d{4})\/(\d{2})\/[^/_]+_(\d{2})_/);
+        const rel = String(relative || '').toLowerCase();
+        const n = Number((rel.match(/\d+/) || [])[0] || 0);
+        let approx = null;
+        if (/минут|minute/.test(rel)) approx = new Date(Date.now() - n * 60000);
+        else if (/час|hour/.test(rel)) approx = new Date(Date.now() - n * 3600000);
+        else if (/секунд|second|только что|just now/.test(rel)) approx = new Date();
+
+        const pad = (x) => String(x).padStart(2, '0');
+        let date = '';
+        if (m && Number(m[3]) >= 1 && Number(m[3]) <= 31) date = `${m[3]}.${m[2]}.${m[1]}`;
+        else if (approx) date = `${pad(approx.getDate())}.${pad(approx.getMonth() + 1)}.${approx.getFullYear()}`;
+        if (!date) return null;
+        const time = approx ? `≈${pad(approx.getHours())}:${pad(approx.getMinutes())}` : '';
+        return { date, time };
+    }
+
     function buildMetaWrap(row, genreTd, uploadedTd) {
         const artistCell = row.querySelector('td:nth-child(3)');
         const a = parseArtistCell(artistCell);
@@ -3284,7 +3307,12 @@
         ];
         // Жанр показываем отдельной графой перед «Дата релиза» (buildSongFieldsHtml / buildAlbumInfoHtml).
         row.dataset.rmGenre = genre;
-        if (uploaded) parts.push(`<span>${escapeHtml(uploaded)}</span>`);
+        const up = uploadDateOf(row, uploaded);
+        if (up) {
+            parts.push(`<span class="rm-uploaded" title="Загружен: ${escapeHtml(uploaded || up.date)}">Загружен ${up.date}${up.time ? `, ${up.time}` : ''}</span>`);
+        } else if (uploaded) {
+            parts.push(`<span>${escapeHtml(uploaded)}</span>`);
+        }
 
         const wrap = document.createElement('div');
         wrap.className = 'rm-meta-wrap';
