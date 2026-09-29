@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.9.0
+// @version      8.9.1
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -3352,7 +3352,8 @@
         return null;
     }
 
-    // Сразу — дата из пути файла, затем (когда найдётся) — «2 часа назад (29.09.2026 11:39)», как у комментариев.
+    // Текст сайта как есть («43 минут тому назад»), а в скобках — наша дата: сразу из пути файла,
+    // затем (когда найдётся) — с точным временем: «43 минут тому назад (29.09.2026 11:39)».
     function renderUploadTime(row, span, relative) {
         const info = uploadFileInfo(row);
         if (!info) return;
@@ -3360,25 +3361,9 @@
         span.textContent = `${relative ? `${relative} ` : ''}(${pad(info.day)}.${pad(info.month)}.${info.year})`;
         findUploadTime(info).then((unix) => {
             if (!unix) return;
-            span.textContent = `${formatRelative(unix * 1000)} (${formatDateTime(unix * 1000)})`;
+            span.textContent = `${relative ? `${relative} ` : ''}(${formatDateTime(unix * 1000)})`;
             span.title = 'Время загрузки файла';
         });
-    }
-
-    function humanizeAgo(text) {
-        const t = String(text || '').trim();
-        const m = t.match(/(\d+)\s*(\S+)/);
-        if (!m) return t;
-        const n = Number(m[1]);
-        const unit = m[2].toLowerCase();
-        const forms = /^(sec|секунд)/.test(unit) ? ['секунда', 'секунды', 'секунд']
-            : /^(min|минут)/.test(unit) ? ['минута', 'минуты', 'минут']
-            : /^(hour|час)/.test(unit) ? ['час', 'часа', 'часов']
-            : /^(day|дн|день|дня)/.test(unit) ? ['день', 'дня', 'дней']
-            : /^(week|недел)/.test(unit) ? ['неделя', 'недели', 'недель']
-            : /^(month|месяц)/.test(unit) ? ['месяц', 'месяца', 'месяцев']
-            : /^(year|год|лет)/.test(unit) ? ['год', 'года', 'лет'] : null;
-        return forms ? `${n} ${pluralize(n, forms)} назад` : t;
     }
 
     function buildMetaWrap(row, genreTd, uploadedTd) {
@@ -3395,7 +3380,7 @@
         ];
         // Жанр показываем отдельной графой перед «Дата релиза» (buildSongFieldsHtml / buildAlbumInfoHtml).
         row.dataset.rmGenre = genre;
-        if (uploaded || uploadFileInfo(row)) parts.push(`<span class="rm-uploaded">${escapeHtml(humanizeAgo(uploaded))}</span>`);
+        if (uploaded || uploadFileInfo(row)) parts.push(`<span class="rm-uploaded">${escapeHtml(uploaded)}</span>`);
 
         const wrap = document.createElement('div');
         wrap.className = 'rm-meta-wrap';
@@ -3411,7 +3396,7 @@
         }
         if (!wrap.querySelector('.rm-stats').children.length) wrap.querySelector('.rm-stats').remove();
         const upSpan = wrap.querySelector('.rm-uploaded');
-        if (upSpan) renderUploadTime(row, upSpan, humanizeAgo(uploaded));
+        if (upSpan) renderUploadTime(row, upSpan, uploaded);
         return wrap;
     }
 
