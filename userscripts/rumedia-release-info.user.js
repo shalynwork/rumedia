@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.8.0
+// @version      8.9.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -3270,27 +3270,115 @@
             <span class="rm-chip-label">${escapeHtml(label)}</span>${num !== '' ? `<b>${escapeHtml(num)}</b>` : ''}</span>`;
     }
 
-    // Полная дата загрузки. Сайт показывает только «2 дней тому назад», но в пути файла она есть:
-    // upload/audio/2026/09/<ключ>_24_<md5>… — год и месяц в папках, число — в имени (день загрузки).
-    // Берём аудио (синглы), иначе обложку (альбомы). Если по «N часов/минут назад» можно — добавляем время.
-    function uploadDateOf(row, relative) {
+    /* ---------- точное время загрузки релиза ----------
+       Сайт пишет только «2 дней тому назад». Но файлы он сохраняет как
+       upload/audio/ГГГГ/ММ/<ключ>_<день>_<md5(unix-время загрузки)>_…
+       Значит, зная день, можно перебором секунд найти время, чей md5 совпадает с хешем
+       (сутки — ~100 тыс. вариантов, доли секунды). Результат кешируется в localStorage. */
+
+    // MD5 для коротких ASCII-строк (числа-секунды). WebCrypto MD5 не умеет.
+    function md5Hex(str) {
+        const k = [], r = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+        for (let i = 0; i < 64; i++) k[i] = (Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
+        md5Hex = (s) => {
+            const n = s.length;
+            const words = new Array(((n + 8) >> 6) + 1 << 4).fill(0);
+            for (let i = 0; i < n; i++) words[i >> 2] |= s.charCodeAt(i) << ((i % 4) * 8);
+            words[n >> 2] |= 0x80 << ((n % 4) * 8);
+            words[words.length - 2] = n * 8;
+            let a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+            for (let j = 0; j < words.length; j += 16) {
+                let a = a0, b = b0, c = c0, d = d0;
+                for (let i = 0; i < 64; i++) {
+                    let f, g;
+                    if (i < 16) { f = (b & c) | (~b & d); g = i; }
+                    else if (i < 32) { f = (d & b) | (~d & c); g = (5 * i + 1) % 16; }
+                    else if (i < 48) { f = b ^ c ^ d; g = (3 * i + 5) % 16; }
+                    else { f = c ^ (b | ~d); g = (7 * i) % 16; }
+                    const t = d;
+                    d = c;
+                    c = b;
+                    const x = (a + f + k[i] + words[j + g]) | 0;
+                    const sh = r[(i >> 4) * 4 + (i % 4)];
+                    b = (b + ((x << sh) | (x >>> (32 - sh)))) | 0;
+                    a = t;
+                }
+                a0 = (a0 + a) | 0; b0 = (b0 + b) | 0; c0 = (c0 + c) | 0; d0 = (d0 + d) | 0;
+            }
+            return [a0, b0, c0, d0]
+                .map((v) => Array.from({ length: 4 }, (_, i) => ((v >>> (i * 8)) & 255).toString(16).padStart(2, '0')).join(''))
+                .join('');
+        };
+        return md5Hex(str);
+    }
+
+    // { year, month, day, hash } из ссылки на аудио (синглы) или обложку (альбомы).
+    function uploadFileInfo(row) {
         const src = row.querySelector('audio source[src], audio[src]')?.getAttribute('src') ||
             row.querySelector('td:nth-child(2) img')?.getAttribute('src') || '';
-        const m = src.match(/\/upload\/(?:audio|photos|videos)\/(\d{4})\/(\d{2})\/[^/_]+_(\d{2})_/);
-        const rel = String(relative || '').toLowerCase();
-        const n = Number((rel.match(/\d+/) || [])[0] || 0);
-        let approx = null;
-        if (/минут|minute/.test(rel)) approx = new Date(Date.now() - n * 60000);
-        else if (/час|hour/.test(rel)) approx = new Date(Date.now() - n * 3600000);
-        else if (/секунд|second|только что|just now/.test(rel)) approx = new Date();
+        const m = src.match(/\/upload\/(?:audio|photos|videos)\/(\d{4})\/(\d{2})\/[^/_]+_(\d{2})_([0-9a-f]{32})_/);
+        if (!m || Number(m[3]) < 1 || Number(m[3]) > 31) return null;
+        return { year: +m[1], month: +m[2], day: +m[3], hash: m[4] };
+    }
 
+    const UPLOAD_TIME_CACHE = 'rm-upload-time:';
+
+    // Ищем секунду загрузки. Сначала сутки по Москве (сервер в РФ), потом с запасом на любой пояс.
+    // Перебор кусками, чтобы не подвешивать страницу.
+    async function findUploadTime(info) {
+        try {
+            const cached = Number(localStorage.getItem(UPLOAD_TIME_CACHE + info.hash));
+            if (cached > 0) return cached;
+        } catch (_) { /* без кеша */ }
+
+        const dayUtc = Date.UTC(info.year, info.month - 1, info.day) / 1000;
+        const ranges = [
+            [dayUtc - 3 * 3600, dayUtc + 21 * 3600],          // сутки по МСК
+            [dayUtc - 14 * 3600, dayUtc - 3 * 3600],          // запас на другой часовой пояс
+            [dayUtc + 21 * 3600, dayUtc + 36 * 3600],
+        ];
+        for (const [from, to] of ranges) {
+            for (let t = from; t < to; t += 20000) {
+                const end = Math.min(to, t + 20000);
+                for (let x = t; x < end; x++) {
+                    if (md5Hex(String(x)) === info.hash) {
+                        try { localStorage.setItem(UPLOAD_TIME_CACHE + info.hash, String(x)); } catch (_) { /* ок */ }
+                        return x;
+                    }
+                }
+                await new Promise((r) => setTimeout(r, 0));
+            }
+        }
+        return null;
+    }
+
+    // Сразу — дата из пути файла, затем (когда найдётся) — «2 часа назад (29.09.2026 11:39)», как у комментариев.
+    function renderUploadTime(row, span, relative) {
+        const info = uploadFileInfo(row);
+        if (!info) return;
         const pad = (x) => String(x).padStart(2, '0');
-        let date = '';
-        if (m && Number(m[3]) >= 1 && Number(m[3]) <= 31) date = `${m[3]}.${m[2]}.${m[1]}`;
-        else if (approx) date = `${pad(approx.getDate())}.${pad(approx.getMonth() + 1)}.${approx.getFullYear()}`;
-        if (!date) return null;
-        const time = approx ? `≈${pad(approx.getHours())}:${pad(approx.getMinutes())}` : '';
-        return { date, time };
+        span.textContent = `${relative ? `${relative} ` : ''}(${pad(info.day)}.${pad(info.month)}.${info.year})`;
+        findUploadTime(info).then((unix) => {
+            if (!unix) return;
+            span.textContent = `${formatRelative(unix * 1000)} (${formatDateTime(unix * 1000)})`;
+            span.title = 'Время загрузки файла';
+        });
+    }
+
+    function humanizeAgo(text) {
+        const t = String(text || '').trim();
+        const m = t.match(/(\d+)\s*(\S+)/);
+        if (!m) return t;
+        const n = Number(m[1]);
+        const unit = m[2].toLowerCase();
+        const forms = /^(sec|секунд)/.test(unit) ? ['секунда', 'секунды', 'секунд']
+            : /^(min|минут)/.test(unit) ? ['минута', 'минуты', 'минут']
+            : /^(hour|час)/.test(unit) ? ['час', 'часа', 'часов']
+            : /^(day|дн|день|дня)/.test(unit) ? ['день', 'дня', 'дней']
+            : /^(week|недел)/.test(unit) ? ['неделя', 'недели', 'недель']
+            : /^(month|месяц)/.test(unit) ? ['месяц', 'месяца', 'месяцев']
+            : /^(year|год|лет)/.test(unit) ? ['год', 'года', 'лет'] : null;
+        return forms ? `${n} ${pluralize(n, forms)} назад` : t;
     }
 
     function buildMetaWrap(row, genreTd, uploadedTd) {
@@ -3307,12 +3395,7 @@
         ];
         // Жанр показываем отдельной графой перед «Дата релиза» (buildSongFieldsHtml / buildAlbumInfoHtml).
         row.dataset.rmGenre = genre;
-        const up = uploadDateOf(row, uploaded);
-        if (up) {
-            parts.push(`<span class="rm-uploaded" title="Загружен: ${escapeHtml(uploaded || up.date)}">Загружен ${up.date}${up.time ? `, ${up.time}` : ''}</span>`);
-        } else if (uploaded) {
-            parts.push(`<span>${escapeHtml(uploaded)}</span>`);
-        }
+        if (uploaded || uploadFileInfo(row)) parts.push(`<span class="rm-uploaded">${escapeHtml(humanizeAgo(uploaded))}</span>`);
 
         const wrap = document.createElement('div');
         wrap.className = 'rm-meta-wrap';
@@ -3327,6 +3410,8 @@
             wrap.querySelector('.rm-stats').appendChild(rating);
         }
         if (!wrap.querySelector('.rm-stats').children.length) wrap.querySelector('.rm-stats').remove();
+        const upSpan = wrap.querySelector('.rm-uploaded');
+        if (upSpan) renderUploadTime(row, upSpan, humanizeAgo(uploaded));
         return wrap;
     }
 
