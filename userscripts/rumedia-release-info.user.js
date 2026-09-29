@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.9.1
+// @version      8.10.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -1775,6 +1775,7 @@
             ? fetchAlbumInfo(editId)
             : Promise.resolve({ aiUsed: null, artists: '', written: '', releaseDate: '', apple: null, trackCount: null });
 
+        infoPromise.then((info) => updateAlbumUploadTime(row, info?.tracks)).catch(() => {});
         Promise.all([fetchAlbumComments(slug), infoPromise])
             .then(([comments, info]) => {
                 renderAlbumInfo(row, info);
@@ -3312,58 +3313,103 @@
         return md5Hex(str);
     }
 
-    // { year, month, day, hash } из ссылки на аудио (синглы) или обложку (альбомы).
-    function uploadFileInfo(row) {
-        const src = row.querySelector('audio source[src], audio[src]')?.getAttribute('src') ||
-            row.querySelector('td:nth-child(2) img')?.getAttribute('src') || '';
-        const m = src.match(/\/upload\/(?:audio|photos|videos)\/(\d{4})\/(\d{2})\/[^/_]+_(\d{2})_([0-9a-f]{32})_/);
-        if (!m || Number(m[3]) < 1 || Number(m[3]) > 31) return null;
-        return { year: +m[1], month: +m[2], day: +m[3], hash: m[4] };
+    // Файлы релиза из ссылок: { year, month, day, hash, kind }. Аватар артиста (3-я ячейка) не берём.
+    const UPLOAD_PATH_RE = /\/upload\/(audio|photos|videos)\/(\d{4})\/(\d{2})\/[^/_]+_(\d{2})_([0-9a-f]{32})_/;
+
+    function parseUploadPath(src, kind) {
+        const m = String(src || '').match(UPLOAD_PATH_RE);
+        if (!m || Number(m[4]) < 1 || Number(m[4]) > 31) return null;
+        return { year: +m[2], month: +m[3], day: +m[4], hash: m[5], kind };
+    }
+
+    function releaseFilesOf(row, extraAudio = []) {
+        const files = [];
+        row.querySelectorAll('audio source[src], audio[src]').forEach((a) => files.push(parseUploadPath(a.getAttribute('src'), 'аудио')));
+        row.querySelectorAll('td:nth-child(2) img').forEach((img) => files.push(parseUploadPath(img.getAttribute('src'), 'обложка')));
+        extraAudio.forEach((src, i) => files.push(parseUploadPath(src, `трек ${i + 1}`)));
+        const seen = new Set();
+        return files.filter((f) => f && !seen.has(f.hash) && seen.add(f.hash));
     }
 
     const UPLOAD_TIME_CACHE = 'rm-upload-time:';
 
-    // Ищем секунду загрузки. Сначала сутки по Москве (сервер в РФ), потом с запасом на любой пояс.
-    // Перебор кусками, чтобы не подвешивать страницу.
-    async function findUploadTime(info) {
-        try {
-            const cached = Number(localStorage.getItem(UPLOAD_TIME_CACHE + info.hash));
-            if (cached > 0) return cached;
-        } catch (_) { /* без кеша */ }
-
-        const dayUtc = Date.UTC(info.year, info.month - 1, info.day) / 1000;
-        const ranges = [
-            [dayUtc - 3 * 3600, dayUtc + 21 * 3600],          // сутки по МСК
-            [dayUtc - 14 * 3600, dayUtc - 3 * 3600],          // запас на другой часовой пояс
-            [dayUtc + 21 * 3600, dayUtc + 36 * 3600],
-        ];
-        for (const [from, to] of ranges) {
-            for (let t = from; t < to; t += 20000) {
-                const end = Math.min(to, t + 20000);
-                for (let x = t; x < end; x++) {
-                    if (md5Hex(String(x)) === info.hash) {
-                        try { localStorage.setItem(UPLOAD_TIME_CACHE + info.hash, String(x)); } catch (_) { /* ок */ }
-                        return x;
-                    }
+    // Время загрузки каждого файла: один проход по секундам нужных суток сразу на все хеши.
+    // Сначала сутки по Москве (сервер в РФ), потом с запасом на другой часовой пояс. Кусками — без подвисаний.
+    async function findUploadTimes(files) {
+        const result = new Map();
+        const pending = new Map();
+        files.forEach((f) => {
+            try {
+                const cached = Number(localStorage.getItem(UPLOAD_TIME_CACHE + f.hash));
+                if (cached > 0) {
+                    result.set(f.hash, cached);
+                    return;
                 }
-                await new Promise((r) => setTimeout(r, 0));
+            } catch (_) { /* без кеша */ }
+            pending.set(f.hash, f);
+        });
+
+        const dayKey = (f) => `${f.year}-${f.month}-${f.day}`;
+        const days = new Map();
+        pending.forEach((f) => days.set(dayKey(f), f));
+        for (const [key, f] of days) {
+            const left = () => [...pending.values()].some((p) => dayKey(p) === key);
+            const dayUtc = Date.UTC(f.year, f.month - 1, f.day) / 1000;
+            const ranges = [
+                [dayUtc - 3 * 3600, dayUtc + 21 * 3600],
+                [dayUtc - 14 * 3600, dayUtc - 3 * 3600],
+                [dayUtc + 21 * 3600, dayUtc + 36 * 3600],
+            ];
+            search: for (const [from, to] of ranges) {
+                for (let t = from; t < to; t += 20000) {
+                    const end = Math.min(to, t + 20000);
+                    for (let x = t; x < end; x++) {
+                        const h = md5Hex(String(x));
+                        if (!pending.has(h)) continue;
+                        result.set(h, x);
+                        pending.delete(h);
+                        try { localStorage.setItem(UPLOAD_TIME_CACHE + h, String(x)); } catch (_) { /* ок */ }
+                        if (!left()) break search;
+                    }
+                    await new Promise((r) => setTimeout(r, 0));
+                }
             }
         }
-        return null;
+        return result;
     }
 
-    // Текст сайта как есть («43 минут тому назад»), а в скобках — наша дата: сразу из пути файла,
-    // затем (когда найдётся) — с точным временем: «43 минут тому назад (29.09.2026 11:39)».
-    function renderUploadTime(row, span, relative) {
-        const info = uploadFileInfo(row);
-        if (!info) return;
+    // Текст сайта как есть («43 минут тому назад» — это создание релиза), а в скобках — время
+    // ПОСЛЕДНЕГО загруженного файла (обложка/аудио/треки альбома): ближе всего к отправке на модерацию,
+    // и обновляется, если артист перезалил файл после отказа. В подсказке — время каждого файла.
+    function renderUploadTime(row, span, relative, extraAudio = []) {
+        const files = releaseFilesOf(row, extraAudio);
+        if (!files.length) return;
         const pad = (x) => String(x).padStart(2, '0');
-        span.textContent = `${relative ? `${relative} ` : ''}(${pad(info.day)}.${pad(info.month)}.${info.year})`;
-        findUploadTime(info).then((unix) => {
-            if (!unix) return;
-            span.textContent = `${relative ? `${relative} ` : ''}(${formatDateTime(unix * 1000)})`;
-            span.title = 'Время загрузки файла';
+        const dayNum = (f) => f.year * 10000 + f.month * 100 + f.day;
+        const latestDay = files.reduce((a, f) => (dayNum(f) > dayNum(a) ? f : a));
+        const token = String(Math.random());
+        span.dataset.rmUploadToken = token;
+        if (!span.dataset.rmUploadDone) {
+            span.textContent = `${relative ? `${relative} ` : ''}(${pad(latestDay.day)}.${pad(latestDay.month)}.${latestDay.year})`;
+        }
+        findUploadTimes(files).then((times) => {
+            if (span.dataset.rmUploadToken !== token) return; // уже пересчитывается с треками альбома
+            const known = files.filter((f) => times.has(f.hash)).map((f) => ({ ...f, t: times.get(f.hash) }));
+            if (!known.length) return;
+            known.sort((x, y) => x.t - y.t);
+            const last = known[known.length - 1];
+            span.textContent = `${relative ? `${relative} ` : ''}(${formatDateTime(last.t * 1000)})`;
+            span.dataset.rmUploadDone = '1';
+            span.title = known.map((f) => `${f.kind}: ${formatDateTime(f.t * 1000)}`).join('\n') +
+                '\n\nВ скобках — последний загруженный файл (≈ отправка на модерацию).';
         });
+    }
+
+    // Альбом: когда пришли треки со страницы редактирования — пересчитать вместе с их файлами.
+    function updateAlbumUploadTime(row, tracks) {
+        const span = row.querySelector('.rm-uploaded');
+        const srcs = (tracks || []).map((t) => t.audioSrc).filter(Boolean);
+        if (span && srcs.length) renderUploadTime(row, span, span.dataset.rmRelative || '', srcs);
     }
 
     function buildMetaWrap(row, genreTd, uploadedTd) {
@@ -3380,7 +3426,9 @@
         ];
         // Жанр показываем отдельной графой перед «Дата релиза» (buildSongFieldsHtml / buildAlbumInfoHtml).
         row.dataset.rmGenre = genre;
-        if (uploaded || uploadFileInfo(row)) parts.push(`<span class="rm-uploaded">${escapeHtml(uploaded)}</span>`);
+        if (uploaded || releaseFilesOf(row).length) {
+            parts.push(`<span class="rm-uploaded" data-rm-relative="${escapeHtml(uploaded)}">${escapeHtml(uploaded)}</span>`);
+        }
 
         const wrap = document.createElement('div');
         wrap.className = 'rm-meta-wrap';
