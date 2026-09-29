@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.2.1
+// @version      8.3.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -452,7 +452,7 @@
         return `${names}<div class="rm-author-hints">${hints}</div>`;
     }
 
-    function buildAlbumInfoHtml(info) {
+    function buildAlbumInfoHtml(info, row) {
         const field = (label, value) =>
             `<div class="rai-field"><div class="rai-label">${label}</div><div class="rai-value">${value}</div></div>`;
 
@@ -460,6 +460,7 @@
                 ${field('Артисты', artistsFieldHtml(info.artistList, info.artists))}
                 ${field('Автор', authorFieldHtml(info.written, 'не указан'))}
                 ${field('Apple', buildAiBadge(info.apple))}
+                ${field('Жанр', fieldOrMissing(row?.dataset.rmGenre, 'не указан'))}
                 ${field('Дата релиза', fieldOrMissing(info.releaseDate, 'не указана'))}
                 ${field('Обложка ИИ', buildAiBadge(info.aiUsed))}
             </div>`;
@@ -479,7 +480,7 @@
         if (!cell) return;
 
         const wrap = document.createElement('div');
-        wrap.innerHTML = buildAlbumInfoHtml(info);
+        wrap.innerHTML = buildAlbumInfoHtml(info, row);
 
         const old = cell.querySelector('.release-album-info');
         if (old) old.replaceWith(wrap.firstElementChild);
@@ -1090,6 +1091,7 @@
                 ${field('Мат', buildAiBadge(explicitFlag(details.age)))}
                 ${field('Обложка ИИ', buildAiBadge(details.aiArtwork))}
                 ${field('Apple', buildAiBadge(details.apple))}
+                ${field('Жанр', fieldOrMissing(row.dataset.rmGenre, 'не указан'))}
                 ${field('Дата релиза', fieldOrMissing(details.releaseDate, 'не указана'))}
             </div>`;
     }
@@ -1135,8 +1137,8 @@
     /* ---------- скелетоны (только в редизайне списков) ---------- */
 
     const SKEL_FIELDS = {
-        song: [['Артисты', 80], ['Автор', 130], ['Продюсер', 120], ['Вокал', 40], ['Мат', 40], ['Обложка ИИ', 44], ['Apple', 40], ['Дата релиза', 76]],
-        album: [['Артисты', 90], ['Автор', 140], ['Apple', 40], ['Дата релиза', 76], ['Обложка ИИ', 44]],
+        song: [['Артисты', 80], ['Автор', 130], ['Продюсер', 120], ['Вокал', 40], ['Мат', 40], ['Обложка ИИ', 44], ['Apple', 40], ['Жанр', 70], ['Дата релиза', 76]],
+        album: [['Артисты', 90], ['Автор', 140], ['Apple', 40], ['Жанр', 70], ['Дата релиза', 76], ['Обложка ИИ', 44]],
     };
 
     const skelBar = (width, extra = '') => `<span class="rm-skel${extra}" style="width:${width}px"></span>`;
@@ -1342,6 +1344,7 @@
     const ANALYZER_ICONS = {
         ok: '<svg width="18" height="18" viewBox="0 0 24 24" fill="#16a34a" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.1 14.6-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4-7 7z"/></svg>',
         violation: '<svg width="18" height="18" viewBox="0 0 24 24" fill="#dc2626" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+        lyrics: '<svg width="18" height="18" viewBox="0 0 24 24" fill="#d97706" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
         error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="#9ca3af" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
     };
 
@@ -1362,6 +1365,23 @@
         'неприменимо': '',
     };
 
+    // Проверка корректности текста (lyrics_check с сервера): что именно не так.
+    const LYRICS_ISSUE = {
+        'не_текст': 'Заметка вместо текста',
+        'описание': 'Описание вместо текста',
+        'таймкоды': 'Таймкоды',
+        'расшифровка': 'Автоматическая расшифровка',
+        'мусор': 'Не текст песни',
+        'другое': 'Другое',
+    };
+
+    const lyricsInvalid = (data) => data?.lyrics_check?.status === 'invalid';
+
+    function analyzerStateOf(data) {
+        if (data?.verdict === 'violation') return 'violation';
+        return lyricsInvalid(data) ? 'lyrics' : 'ok';
+    }
+
     function setAnalyzerState(btn, state, data) {
         btn.dataset.state = state;
         if (state === 'loading') {
@@ -1376,8 +1396,13 @@
             btn.innerHTML = ANALYZER_ICONS.ok;
         } else if (state === 'violation') {
             const r = RISK[data?.severity];
-            btn.title = `Проверено ИИ: есть замечания · риск ${r?.word || data?.severity || '—'}`;
+            btn.title = `Проверено ИИ: есть замечания · риск ${r?.word || data?.severity || '—'}` +
+                (lyricsInvalid(data) ? ' · текст некорректный' : '');
             btn.innerHTML = ANALYZER_ICONS.violation;
+        } else if (state === 'lyrics') {
+            const issue = data.lyrics_check.issues?.[0];
+            btn.title = 'Проверено ИИ: текст некорректный' + (issue ? ` · ${LYRICS_ISSUE[issue.type] || issue.type}` : '');
+            btn.innerHTML = ANALYZER_ICONS.lyrics;
         } else {
             btn.title = 'Ошибка проверки (клик — повторить): ' + (data || '');
             btn.innerHTML = ANALYZER_ICONS.error;
@@ -1460,14 +1485,17 @@
         }
 
         const isViol = data.verdict === 'violation';
+        const badText = lyricsInvalid(data);
         const sevKey = data.severity || (isViol ? 'medium' : 'none');
         const risk = RISK[sevKey] || RISK.none;
         const accent = isViol ? risk.color : '#16a34a';
+        const statusText = isViol ? 'Есть замечания' : badText ? 'Текст некорректный' : 'Нарушений нет';
+        const statusColor = isViol ? accent : badText ? '#d97706' : accent;
 
         // Статус
         let html = `<div style="display:flex; align-items:center; gap:9px; margin-bottom:10px;">
-            <span style="width:9px; height:9px; border-radius:50%; background:${accent}; flex:none;"></span>
-            <span style="font-size:16px; font-weight:600; color:var(--rm-fg);">${isViol ? 'Есть замечания' : 'Нарушений нет'}</span>
+            <span style="width:9px; height:9px; border-radius:50%; background:${statusColor}; flex:none;"></span>
+            <span style="font-size:16px; font-weight:600; color:var(--rm-fg);">${statusText}</span>
         </div>`;
 
         // Мета-строка: риск · подача · кеш
@@ -1477,6 +1505,11 @@
         }
         const framing = FRAMING[data.overall_framing];
         if (framing) meta.push(`Подача: ${escapeHtml(framing)}`);
+        if (data.lyrics_check) {
+            meta.push(badText
+                ? '<span style="color:#b45309; font-weight:600;">Текст: некорректный</span>'
+                : 'Текст: корректный');
+        }
         if (data.cached) meta.push('из кеша');
         if (meta.length) {
             html += `<div style="font-size:13px; color:var(--rm-muted-fg); margin-bottom:18px;">
@@ -1484,6 +1517,19 @@
             </div>`;
         } else {
             html += '<div style="height:8px;"></div>';
+        }
+
+        // Корректность текста — первым блоком: без нормального текста дальше смотреть нет смысла.
+        if (badText) {
+            const issues = data.lyrics_check.issues || [];
+            html += `<div style="margin:0 0 20px; padding:14px 16px; border:1px solid #fde68a; border-radius:10px; background:#fffbeb;">
+                <div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:${issues.length ? '10px' : '0'};">Это не похоже на текст песни</div>
+                ${issues.map((it) => `<div style="margin-top:10px;">
+                    <div style="${LABEL_STYLE} color:#b45309; margin-bottom:6px;">${escapeHtml(LYRICS_ISSUE[it.type] || it.type || 'Другое')}</div>
+                    ${it.fragment ? `<div style="border-left:2px solid #f59e0b; padding-left:10px; font-size:13.5px; line-height:1.5; color:var(--rm-fg); margin-bottom:6px;">${escapeHtml(it.fragment)}</div>` : ''}
+                    ${it.reason ? `<div style="font-size:13px; line-height:1.55; color:#92400e;">${escapeHtml(it.reason)}</div>` : ''}
+                </div>`).join('')}
+            </div>`;
         }
 
         // Итог
@@ -1570,7 +1616,7 @@
             const details = await fetchDetails(id);
             const data = await analyzeLyrics(id, details.lyrics || '', force);
             btn._analysis = data;
-            setAnalyzerState(btn, data.verdict === 'violation' ? 'violation' : 'ok', data);
+            setAnalyzerState(btn, analyzerStateOf(data), data);
         } catch (err) {
             const msg = err.message || String(err);
             btn._analysis = { error: msg };
@@ -2907,7 +2953,8 @@
                 <span>${escapeHtml(a.name || '—')}</span>
             </a>${a.isPremium ? '<span class="rm-badge">Премиум</span>' : ''}`,
         ];
-        if (genre) parts.push(`<span>${escapeHtml(genre)}</span>`);
+        // Жанр показываем отдельной графой перед «Дата релиза» (buildSongFieldsHtml / buildAlbumInfoHtml).
+        row.dataset.rmGenre = genre;
         if (uploaded) parts.push(`<span>${escapeHtml(uploaded)}</span>`);
 
         const wrap = document.createElement('div');
