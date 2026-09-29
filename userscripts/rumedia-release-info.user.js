@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.6.0
+// @version      8.6.1
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -2551,10 +2551,10 @@
         .rm-chip { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border:1px solid var(--rm-border);
             border-radius:var(--rm-radius-sm); background:var(--rm-card); font-size:12.5px; color:var(--rm-muted-fg); white-space:nowrap; }
         .rm-chip b { font-weight:600; color:var(--rm-fg); font-variant-numeric:tabular-nums; }
-        .rm-chip--ok b { color:var(--rm-success); }
+        .rm-chip--danger { border-color:var(--rm-destructive-border); background:var(--rm-destructive-bg); color:var(--rm-destructive); }
         .rm-chip--danger b { color:var(--rm-destructive); }
-        .rm-chip--warn b { color:#b45309; }
-        .rm-chip.is-alert { border-color:var(--rm-destructive-border); background:var(--rm-destructive-bg); color:var(--rm-destructive); }
+        .rm-chip--warn { border-color:#fed7aa; background:#fff7ed; color:#c2410c; }
+        .rm-chip--warn b { color:#c2410c; }
         body.rm-redesign .rm-rating { height:24px; margin-left:4px; }
 
         /* Распознание — компактно, без акцента */
@@ -2566,9 +2566,9 @@
         .rm-rec-pill--ok { background:var(--rm-muted); color:var(--rm-muted-fg); }
         .rm-rec-pill--bad { background:var(--rm-destructive-bg); color:var(--rm-destructive); }
         .rm-rec-count { font-size:12px; }
-        .rm-rec-toggle { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border:none; border-radius:var(--rm-radius-sm);
-            background:transparent; font:inherit; font-size:12.5px; font-weight:500; color:var(--rm-muted-fg); cursor:pointer; }
-        .rm-rec-toggle:hover { background:var(--rm-accent); color:var(--rm-fg); }
+        .rm-rec-toggle { gap:4px; border:none; font:inherit; font-size:12px; font-weight:500; cursor:pointer; }
+        .rm-rec-toggle::before { display:none; }
+        .rm-rec-toggle:hover { filter:brightness(.97); }
         .rm-rec-toggle svg { transition:transform .15s; }
         .rm-rec-toggle.is-open svg { transform:rotate(180deg); }
         .rm-rec-list[hidden] { display:none; }
@@ -3244,14 +3244,13 @@
             num = '0';
         }
         const tone = /отправлен/i.test(label)
-            ? (num === '0' ? 'danger' : 'ok')
+            ? ''
             : /отклон/i.test(label)
               ? 'danger'
               : /подтвержд/i.test(label)
                 ? 'warn'
                 : stat.kind === 'red' ? 'danger' : stat.kind === 'orange' ? 'warn' : stat.kind === 'green' ? 'ok' : '';
-        const zero = /отправлен/i.test(label) && num === '0';
-        return `<span class="rm-chip${tone ? ' rm-chip--' + tone : ''}${zero ? ' is-alert' : ''}" title="${escapeHtml(stat.text)}">
+        return `<span class="rm-chip${tone ? ' rm-chip--' + tone : ''}" title="${escapeHtml(stat.text)}">
             <span class="rm-chip-label">${escapeHtml(label)}</span>${num !== '' ? `<b>${escapeHtml(num)}</b>` : ''}</span>`;
     }
 
@@ -3372,15 +3371,14 @@
             })
             .join('');
 
-        const count = entries.length
-            ? `<span class="rm-rec-count">${entries.length} ${pluralize(entries.length, ['совпадение', 'совпадения', 'совпадений'])}</span>`
-            : '';
-
+        // Одна надпись: «Найдено 3 совпадения» (клик — список со ссылками) или статус сайта, если совпадений нет.
+        const n = entries.length;
+        const headText = n ? `Найдено ${n} ${pluralize(n, ['совпадение', 'совпадения', 'совпадений'])}` : statusText || 'Нет данных';
         statusTd.innerHTML = `
             <div class="rm-rec-head">
-                <span class="rm-rec-pill${tone ? ' rm-rec-pill--' + tone : ''}">${escapeHtml(statusText || 'Нет данных')}</span>
-                ${count}
-                ${items ? `<button type="button" class="rm-rec-toggle" aria-expanded="false">Показать${CHEVRON_DOWN}</button>` : ''}
+                ${items
+                    ? `<button type="button" class="rm-rec-pill rm-rec-pill--${tone || 'warn'} rm-rec-toggle" aria-expanded="false" title="Показать совпадения">${escapeHtml(headText)}${CHEVRON_DOWN}</button>`
+                    : `<span class="rm-rec-pill${tone ? ' rm-rec-pill--' + tone : ''}">${escapeHtml(headText)}</span>`}
             </div>
             ${items ? `<div class="rm-rec-list" hidden>${items}</div>` : ''}`;
         const recToggle = statusTd.querySelector('.rm-rec-toggle');
@@ -3390,7 +3388,7 @@
             recList.hidden = !open;
             recToggle.classList.toggle('is-open', open);
             recToggle.setAttribute('aria-expanded', String(open));
-            recToggle.innerHTML = `${open ? 'Скрыть' : 'Показать'}${CHEVRON_DOWN}`;
+            recToggle.title = open ? 'Скрыть совпадения' : 'Показать совпадения';
         });
         if (labelTd) labelTd.textContent = 'Распознание';
     }
