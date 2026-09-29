@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.5.0
+// @version      8.5.1
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -2403,7 +2403,7 @@
         body.rm-redesign .rm-queue-card #queue table.rm-ship-table { display:block; width:100%; margin:0 !important; border:1px solid var(--rm-border);
             border-radius:var(--rm-radius-lg); overflow:hidden; font-size:13px; background:var(--rm-card); }
         .rm-ship-table tbody { display:block; }
-        .rm-ship-table tr { display:grid; grid-template-columns:150px minmax(0,1fr) auto auto; align-items:center; gap:14px;
+        .rm-ship-table tr { display:grid; grid-template-columns:170px minmax(0,1fr) auto auto; align-items:center; gap:14px;
             padding:9px 12px; background:transparent !important; }
         .rm-ship-table tr + tr { border-top:1px solid var(--rm-border-soft); }
         .rm-ship-table tr:hover { background:var(--rm-muted-soft) !important; }
@@ -2411,8 +2411,11 @@
         .rm-ship-status { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:500; color:var(--rm-success); }
         .rm-ship-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
         .rm-ship-status.is-warn { color:#b45309; }
+        .rm-ship-status.is-muted { color:var(--rm-muted-fg); }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-success { background:var(--rm-success); border-color:var(--rm-success);
+            color:#fff !important; }
+        body.rm-redesign .rm-queue-card #queue .rm-ship-btn.is-success:hover { background:var(--rm-success-hover); }
         .rm-ship-kind { margin-right:8px; font-weight:500; color:var(--rm-fg); }
-        .rm-ship-id { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; color:var(--rm-muted-fg); }
         .rm-ship-c-links { display:flex !important; gap:14px; }
         body.rm-redesign .rm-queue-card #queue a.rm-ship-link { font-size:13px; font-weight:500; color:var(--rm-fg-soft) !important;
             text-decoration:none !important; }
@@ -2985,13 +2988,13 @@
         const okRows = rows.filter((tr) => /✓/.test(tr.querySelector('td:nth-child(2)')?.textContent || ''));
         if (allForm) {
             const submit = allForm.querySelector('input[name="all_ready"]');
-            submit.value = `Готово для всех без ошибок · ${okRows.length}`;
+            submit.value = 'Применить готово для всех';
             submit.title = 'Отмечает «Готово» все релизы с ✓ — они уйдут из этой очереди. Релизы с ошибкой останутся.';
-            submit.className = 'rm-ship-btn';
+            submit.className = 'rm-ship-btn is-success';
             allForm.classList.add('rm-ship-allform');
             allForm.addEventListener('submit', (e) => {
                 const n = okRows.length;
-                if (!confirm(`Отметить «Готово» ${n} ${pluralize(n, ['релиз', 'релиза', 'релизов'])} без ошибок? Они уйдут из очереди на отгрузку.`)) {
+                if (!confirm(`Применить «Готово» для ${n} ${pluralize(n, ['релиза', 'релизов', 'релизов'])}? Они уйдут из очереди на отгрузку.`)) {
                     e.preventDefault();
                 }
             });
@@ -3008,9 +3011,9 @@
                 const doneLink = tds[2]?.querySelector('a');
                 const href = releaseLink?.getAttribute('href') || '';
                 const kind = /edit-album/.test(href) ? 'Альбом' : 'Сингл';
-                const id = href.split('/').pop() || '';
                 const statusText = ((tds[1]?.textContent || '').replace(ampLink?.textContent || '', '')).replace(/\s+/g, ' ').trim();
-                const ok = statusText === '✓' || statusText === '';
+                // ✓ у сайта — релиз ушёл в Ampsuite и ждёт проверки модератором (потом «Готово»).
+                const needsCheck = /^✓/.test(statusText);
 
                 const cell = (cls, ...nodes) => {
                     const td = document.createElement('td');
@@ -3019,10 +3022,11 @@
                     return td;
                 };
                 const status = document.createElement('span');
-                status.className = `rm-ship-status${ok ? '' : ' is-warn'}`;
-                status.textContent = ok ? 'Без ошибок' : statusText.replace(/^[✓✗✕×]\s*/, '') || 'Нужна проверка';
+                status.className = `rm-ship-status ${needsCheck ? 'is-warn' : 'is-muted'}`;
+                status.textContent = needsCheck ? 'Требует проверки' : statusText.replace(/^[✗✕×]\s*/, '') || 'В очереди';
                 const main = document.createElement('span');
-                main.innerHTML = `<span class="rm-ship-kind">${kind}</span><span class="rm-ship-id">${escapeHtml(id)}</span>`;
+                main.className = 'rm-ship-kind';
+                main.textContent = kind;
                 if (releaseLink) { releaseLink.className = 'rm-ship-link'; releaseLink.textContent = 'Релиз ↗'; }
                 if (ampLink) { ampLink.classList.add('rm-ship-link'); ampLink.textContent = 'Ampsuite ↗'; }
                 if (doneLink) { doneLink.className = 'rm-ship-btn rm-ship-done'; doneLink.textContent = 'Готово'; doneLink.setAttribute('role', 'button'); }
