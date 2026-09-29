@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.5.1
+// @version      8.6.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -2576,6 +2576,52 @@
         .rm-rec-item { padding:8px 12px; }
         .rm-rec-title { font-size:13px; }
         .rm-rec-sub { font-size:12px; }
+
+
+        /* =========================================================
+           Карточка релиза без пустот: шапка (обложка + название + кнопки в ряд),
+           ниже графы и плеер на всю ширину. Ячейка названия (td4) раскрыта через
+           display:contents, чтобы её части встали в общую сетку.
+        ========================================================= */
+        html body.rm-songs .table-responsive1 tr[id],
+        html body.rm-albums .table-responsive1 tr[id] {
+            grid-template-columns:104px minmax(0,1fr) auto;
+            grid-template-areas:"cover title actions" "cover meta actions" "extra extra extra" "fields fields fields" "ai ai ai";
+            column-gap:20px; row-gap:0; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(4) { display:contents !important; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(2) { grid-area:cover; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(2) img { width:104px !important; height:104px !important; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(4) > p { grid-area:title; align-self:end; margin:0 !important; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(4) > .rm-meta-wrap { grid-area:meta; align-self:start; }
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(4) > .rm-extra,
+        html body.rm-albums .table-responsive1 tr[id] > td:nth-child(4) > small { grid-area:extra; margin-top:14px !important; }
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(4) > .rm-details-slot,
+        html body.rm-albums .table-responsive1 tr[id] > td:nth-child(4) > .release-album-info { grid-area:fields; margin-top:16px; }
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(9) { grid-area:ai; margin-top:12px; }
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(9) .rm-audio { flex:1 1 auto; max-width:none; }
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(9) .rm-audio .rm-player { max-width:none; }
+
+        /* кнопки — в один ряд справа от названия */
+        html body.rm-songs .table-responsive1 tr[id] > td:nth-child(10),
+        html body.rm-albums .table-responsive1 tr[id] > td:nth-child(9) {
+            grid-area:actions; align-self:center; flex-direction:row !important; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(n) .btn,
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(n) .release-queue-btn,
+        html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(n) .rm-reject-btn { width:auto !important; }
+
+        /* Распознание: подпись по ширине обложки, текст — по линии названия */
+        html body.rm-songs .table-responsive1 tr.rm-recog { grid-template-columns:104px minmax(0,1fr); column-gap:20px; }
+
+        @media (max-width:1100px) {
+            html body.rm-songs .table-responsive1 tr[id],
+            html body.rm-albums .table-responsive1 tr[id] {
+                grid-template-columns:72px minmax(0,1fr);
+                grid-template-areas:"cover title" "cover meta" "actions actions" "extra extra" "fields fields" "ai ai"; }
+            html body.rm-redesign .table-responsive1 tr[id] > td:nth-child(2) img { width:72px !important; height:72px !important; }
+            html body.rm-songs .table-responsive1 tr[id] > td:nth-child(10),
+            html body.rm-albums .table-responsive1 tr[id] > td:nth-child(9) { justify-content:flex-start; margin-top:14px; }
+            html body.rm-songs .table-responsive1 tr.rm-recog { grid-template-columns:1fr; }
+        }
 
         /* Плеер */
         .rm-player { border-radius:var(--rm-radius-lg) !important; box-shadow:var(--rm-shadow-xs); border-color:var(--rm-border) !important; }
