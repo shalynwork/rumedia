@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Release Details Helper + Album Authors
 // @namespace    https://rumedia.io/
-// @version      8.4.0
+// @version      8.5.0
 // @updateURL    https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @downloadURL  https://raw.githubusercontent.com/shalynwork/rumedia/main/userscripts/rumedia-release-info.user.js
 // @homepageURL  https://github.com/shalynwork/rumedia
@@ -431,7 +431,7 @@
         return null;
     }
 
-    // Значение поля «Автор»/«Продюсер»: подозрительные имена подсвечены, под ними — причина.
+    // Значение поля «Автор»/«Продюсер»: подозрительные имена подсвечены, причина — в подсказке у «!».
     function authorFieldHtml(value, missingText) {
         const v = String(value || '').trim();
         if (!v || v === '—') return fieldOrMissing(v, missingText);
@@ -444,19 +444,18 @@
                     : escapeHtml(p)
             )
             .join(', ');
-        const bad = checked.filter((c) => c.issue);
-        if (!bad.length) return names;
-        const hints = bad
-            .map((c) => `<div class="rm-author-hint">⚠ ${people.length > 1 ? `<b>${escapeHtml(c.p)}</b>: ` : ''}${escapeHtml(c.issue)}</div>`)
-            .join('');
-        return `${names}<div class="rm-author-hints">${hints}</div>`;
+        return names;
     }
 
-    function buildAlbumInfoHtml(info, row) {
-        const field = (label, value) =>
-            `<div class="rai-field"><div class="rai-label">${label}</div><div class="rai-value">${value}</div></div>`;
+    // Графы «Артисты / Автор / Продюсер» — широкие (длинные имена), остальные — короткие.
+    const WIDE_FIELDS = new Set(['Артисты', 'Автор', 'Продюсер']);
+    const infoField = (label, value) =>
+        `<div class="rai-field${WIDE_FIELDS.has(label) ? ' rai-field--wide' : ''}"><div class="rai-label">${label}</div><div class="rai-value">${value}</div></div>`;
 
-        return `<div class="release-album-info">
+    function buildAlbumInfoHtml(info, row) {
+        const field = infoField;
+
+        return `<div class="release-album-info rm-fields rm-fields--album">
                 ${field('Артисты', artistsFieldHtml(info.artistList, info.artists))}
                 ${field('Автор', authorFieldHtml(info.written, 'не указан'))}
                 ${field('Apple', buildAiBadge(info.apple))}
@@ -1079,11 +1078,10 @@
     }
 
     function buildSongFieldsHtml(details, row) {
-        const field = (label, value) =>
-            `<div class="rai-field"><div class="rai-label">${label}</div><div class="rai-value">${value}</div></div>`;
+        const field = infoField;
         const written = details.written && details.written !== '—' ? details.written : row.dataset.rmAuthor;
 
-        return `<div class="release-inline-details release-album-info">
+        return `<div class="release-inline-details release-album-info rm-fields rm-fields--song">
                 ${field('Артисты', artistsFieldHtml(details.artistList, row.dataset.rmArtists))}
                 ${field('Автор', authorFieldHtml(written, 'не указан'))}
                 ${field('Продюсер', authorFieldHtml(details.producer, 'не указан'))}
@@ -1145,9 +1143,9 @@
 
     function buildFieldsSkeleton(kind, extraClass = '') {
         const fields = SKEL_FIELDS[kind]
-            .map(([label, w]) => `<div class="rai-field"><div class="rai-label">${label}</div><div class="rai-value">${skelBar(w)}</div></div>`)
+            .map(([label, w]) => infoField(label, skelBar(w)))
             .join('');
-        return `<div class="release-album-info rm-skel-fields${extraClass}" aria-busy="true">${fields}</div>`;
+        return `<div class="release-album-info rm-fields rm-fields--${kind} rm-skel-fields${extraClass}" aria-busy="true">${fields}</div>`;
     }
 
     function buildCommentsSkeleton(withTracks) {
@@ -2529,6 +2527,53 @@
             animation:rm-pulse 2s cubic-bezier(.4, 0, .6, 1) infinite; }
         .rm-skel-fields .rai-label { color:var(--rm-subtle); }
 
+
+        /* Графы релиза — ровная сетка: люди в первой строке, короткие графы во второй */
+        .release-album-info.rm-fields { display:grid; width:100%; box-sizing:border-box; overflow:hidden;
+            border:1px solid var(--rm-border); border-radius:var(--rm-radius-lg); background:var(--rm-card); }
+        .rm-fields--song { grid-template-columns:repeat(6, minmax(0,1fr)); }
+        .rm-fields--album { grid-template-columns:repeat(4, minmax(0,1fr)); }
+        .rm-fields .rai-field { min-width:0; padding:10px 14px; border:none !important;
+            box-shadow:1px 0 0 0 var(--rm-border-soft), 0 1px 0 0 var(--rm-border-soft); }
+        .rm-fields .rai-field--wide { grid-column:span 2; }
+        .rm-fields .rai-value { overflow-wrap:anywhere; }
+        @media (max-width:1180px) {
+            .rm-fields--song { grid-template-columns:repeat(3, minmax(0,1fr)); }
+            .rm-fields--song .rai-field--wide { grid-column:span 3; }
+            .rm-fields--album { grid-template-columns:repeat(2, minmax(0,1fr)); }
+        }
+
+        /* Статистика артиста — бейджи «подпись  число» */
+        .rm-stats { gap:6px; align-items:center; }
+        .rm-chip { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border:1px solid var(--rm-border);
+            border-radius:var(--rm-radius-sm); background:var(--rm-card); font-size:12.5px; color:var(--rm-muted-fg); white-space:nowrap; }
+        .rm-chip b { font-weight:600; color:var(--rm-fg); font-variant-numeric:tabular-nums; }
+        .rm-chip--ok b { color:var(--rm-success); }
+        .rm-chip--danger b { color:var(--rm-destructive); }
+        .rm-chip--warn b { color:#b45309; }
+        .rm-chip.is-alert { border-color:var(--rm-destructive-border); background:var(--rm-destructive-bg); color:var(--rm-destructive); }
+        body.rm-redesign .rm-rating { height:24px; margin-left:4px; }
+
+        /* Распознание — компактно, без акцента */
+        body.rm-songs .table-responsive1 tr.rm-recog { padding:10px 20px !important; }
+        body.rm-songs .table-responsive1 tr.rm-recog > td:nth-child(1) { padding-top:3px !important; }
+        .rm-rec-head { gap:8px; min-height:24px; }
+        .rm-rec-pill { height:22px; padding:0 8px; font-size:12px; font-weight:500; background:var(--rm-muted); color:var(--rm-fg-soft); }
+        .rm-rec-pill--warn { background:#fffbeb; color:#b45309; }
+        .rm-rec-pill--ok { background:var(--rm-muted); color:var(--rm-muted-fg); }
+        .rm-rec-pill--bad { background:var(--rm-destructive-bg); color:var(--rm-destructive); }
+        .rm-rec-count { font-size:12px; }
+        .rm-rec-toggle { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border:none; border-radius:var(--rm-radius-sm);
+            background:transparent; font:inherit; font-size:12.5px; font-weight:500; color:var(--rm-muted-fg); cursor:pointer; }
+        .rm-rec-toggle:hover { background:var(--rm-accent); color:var(--rm-fg); }
+        .rm-rec-toggle svg { transition:transform .15s; }
+        .rm-rec-toggle.is-open svg { transform:rotate(180deg); }
+        .rm-rec-list[hidden] { display:none; }
+        .rm-rec-list { margin-top:10px; }
+        .rm-rec-item { padding:8px 12px; }
+        .rm-rec-title { font-size:13px; }
+        .rm-rec-sub { font-size:12px; }
+
         /* Плеер */
         .rm-player { border-radius:var(--rm-radius-lg) !important; box-shadow:var(--rm-shadow-xs); border-color:var(--rm-border) !important; }
         .rm-pl-play { border-radius:var(--rm-radius-md) !important; background:var(--rm-primary) !important; }
@@ -3135,6 +3180,31 @@
     // Строка «исполнитель · жанр · загружено» + статистика и рейтинг.
     // Рейтинг ПЕРЕНОСИТСЯ (не копируется): его +/- обновляют число по id="rate-…",
     // и дубль с тем же id сломал бы обновление.
+    // «Отправлено: 14» / «Нет отправленных!» / «Отклонено: 2» → бейдж «Подпись  число».
+    function buildStatChip(stat) {
+        const text = stat.text.replace(/!+$/, '').trim();
+        let label = text;
+        let num = '';
+        const m = text.match(/^(.*?):\s*(\d+)$/);
+        if (m) {
+            label = m[1];
+            num = m[2];
+        } else if (/^нет\s+отправлен/i.test(text)) {
+            label = 'Отправлено';
+            num = '0';
+        }
+        const tone = /отправлен/i.test(label)
+            ? (num === '0' ? 'danger' : 'ok')
+            : /отклон/i.test(label)
+              ? 'danger'
+              : /подтвержд/i.test(label)
+                ? 'warn'
+                : stat.kind === 'red' ? 'danger' : stat.kind === 'orange' ? 'warn' : stat.kind === 'green' ? 'ok' : '';
+        const zero = /отправлен/i.test(label) && num === '0';
+        return `<span class="rm-chip${tone ? ' rm-chip--' + tone : ''}${zero ? ' is-alert' : ''}" title="${escapeHtml(stat.text)}">
+            <span class="rm-chip-label">${escapeHtml(label)}</span>${num !== '' ? `<b>${escapeHtml(num)}</b>` : ''}</span>`;
+    }
+
     function buildMetaWrap(row, genreTd, uploadedTd) {
         const artistCell = row.querySelector('td:nth-child(3)');
         const a = parseArtistCell(artistCell);
@@ -3155,9 +3225,7 @@
         wrap.className = 'rm-meta-wrap';
         wrap.innerHTML = `
             <div class="rm-meta">${parts.join('<span class="rm-sep">·</span>')}</div>
-            <div class="rm-stats">${a.stats
-                .map((s) => `<span class="rm-stat${s.kind ? ' rm-stat--' + s.kind : ''}">${escapeHtml(s.text)}</span>`)
-                .join('')}</div>`;
+            <div class="rm-stats">${a.stats.map(buildStatChip).join('')}</div>`;
 
         const rating = artistCell?.querySelector(':scope > span[style*="white-space"]');
         if (rating) {
@@ -3262,8 +3330,18 @@
             <div class="rm-rec-head">
                 <span class="rm-rec-pill${tone ? ' rm-rec-pill--' + tone : ''}">${escapeHtml(statusText || 'Нет данных')}</span>
                 ${count}
+                ${items ? `<button type="button" class="rm-rec-toggle" aria-expanded="false">Показать${CHEVRON_DOWN}</button>` : ''}
             </div>
-            ${items ? `<div class="rm-rec-list">${items}</div>` : ''}`;
+            ${items ? `<div class="rm-rec-list" hidden>${items}</div>` : ''}`;
+        const recToggle = statusTd.querySelector('.rm-rec-toggle');
+        const recList = statusTd.querySelector('.rm-rec-list');
+        recToggle?.addEventListener('click', () => {
+            const open = recList.hidden;
+            recList.hidden = !open;
+            recToggle.classList.toggle('is-open', open);
+            recToggle.setAttribute('aria-expanded', String(open));
+            recToggle.innerHTML = `${open ? 'Скрыть' : 'Показать'}${CHEVRON_DOWN}`;
+        });
         if (labelTd) labelTd.textContent = 'Распознание';
     }
 
