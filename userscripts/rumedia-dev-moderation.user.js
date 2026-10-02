@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.2.1
+// @version      0.3.0
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -16,8 +16,9 @@
 (function () {
     'use strict';
 
-    /* Сайт — Next.js (серверный рендер, без JSON-API). Очередь фильтруется параметром ?segment=:
-       album_pro / album_regular / single_pro / single_regular, по 12 релизов на страницу (page с 1).
+    /* Сайт — Next.js (серверный рендер, без JSON-API). Очередь отдаётся по 12 релизов на страницу (page с 1).
+       Фильтр сайта ?segment= теряет часть релизов (у новых владельцев нет признака PRO/не-PRO),
+       поэтому грузим всю очередь без фильтра и сами делим: тип — по колонке «Тип», PRO — по бейджу у владельца.
        Вместо таблицы показываем саму страницу каждого релиза во встроенной рамке (тот же сайт, поэтому
        дизайн родной и все кнопки — одобрить, нарушения, клише, плеер — работают как есть). */
 
@@ -161,89 +162,111 @@
     const qs = (sel, root = document) => root.querySelector(sel);
     const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+    // Выбранная вкладка хранится в адресе (?segment=single_pro), чтобы переживать перезагрузку.
     function currentSegment() {
         const seg = new URLSearchParams(location.search).get('segment') || 'album_pro';
         const [kind, tier] = seg.split('_');
-        return { seg, kind: SEGMENTS[kind] ? kind : 'album', tier: tier === 'regular' ? 'regular' : 'pro' };
+        return { kind: SEGMENTS[kind] ? kind : 'album', tier: tier === 'regular' ? 'regular' : 'pro' };
     }
 
-    function goSegment(kind, tier) {
+    function setSegment(kind, tier) {
         const url = new URL(location.href);
         url.searchParams.set('segment', SEGMENTS[kind][tier]);
         url.searchParams.delete('page');
-        location.href = url.toString();
+        history.replaceState(history.state, '', url.toString());
+        viewIndex = 0;
+        renderQueue();
     }
 
-    /* ---------- счётчики сегментов: сколько релизов ждёт в каждом ---------- */
+    /* ---------- вся очередь «Ожидает»: грузим все страницы без фильтра ---------- */
 
-    const countCache = new Map();
+    let queueData = null;   // [{ href, kind: 'album'|'single', pro: bool }]
+    let queueLoading = null;
 
-    async function countSegment(seg) {
-        if (countCache.has(seg)) return countCache.get(seg);
-        const job = (async () => {
-            let total = 0;
-            for (let page = 1; page <= 20; page++) {
-                const html = await (await fetch(`/moderation?segment=${seg}&page=${page}`, { credentials: 'include' })).text();
+    function parseQueueRow(tr) {
+        const link = qs('a[href*="/moderation/release/"]', tr);
+        if (!link || !isPending(tr)) return null;
+        const td = Array.from(tr.children);
+        const type = (td[1]?.textContent || '').trim().toLowerCase();
+        const owner = td[4];
+        return {
+            href: link.getAttribute('href').replace(/\?.*$/, ''),
+            kind: /сингл/.test(type) ? 'single' : 'album',
+            pro: qsa('span', owner).some((sp) => sp.textContent.trim() === 'PRO'),
+        };
+    }
+
+    function loadQueue(force = false) {
+        if (queueLoading && !force) return queueLoading;
+        queueLoading = (async () => {
+            const items = [];
+            const seen = new Set();
+            for (let page = 1; page <= 30; page++) {
+                const html = await (await fetch(`/moderation?page=${page}`, { credentials: 'include', cache: 'no-store' })).text();
                 const doc = new DOMParser().parseFromString(html, 'text/html');
                 const rows = qsa('table tbody tr', doc).filter((tr) => qs('a[href*="/moderation/release/"]', tr));
-                total += rows.filter(isPending).length;
+                rows.map(parseQueueRow).filter(Boolean).forEach((it) => {
+                    if (!seen.has(it.href)) {
+                        seen.add(it.href);
+                        items.push(it);
+                    }
+                });
                 if (rows.length < PAGE_SIZE) break;
             }
-            return total;
+            queueData = items;
+            return items;
         })();
-        countCache.set(seg, job);
-        return job;
+        return queueLoading;
     }
 
-    function fillCount(el, seg) {
-        countSegment(seg)
-            .then((n) => { el.textContent = n; el.hidden = false; })
-            .catch(() => el.remove());
-    }
+    const inSegment = (it, kind, tier) => it.kind === kind && it.pro === (tier === 'pro');
 
     /* ---------- вкладки ---------- */
 
     function buildBar() {
-        const { kind, tier } = currentSegment();
         const bar = document.createElement('div');
         bar.className = 'rmq-bar';
         bar.innerHTML = `
             <div class="rmq-kind" role="tablist">
-                ${Object.entries(SEGMENTS).map(([k, s]) => `
-                    <button type="button" role="tab" data-kind="${k}" class="${k === kind ? 'is-active' : ''}">
-                        ${s.label}<span class="rmq-count" data-count-kind="${k}" hidden></span>
-                    </button>`).join('')}
+                ${Object.entries(SEGMENTS).map(([k, sg]) => `
+                    <button type="button" role="tab" data-kind="${k}">${sg.label}<span class="rmq-count" data-count-kind="${k}" hidden></span></button>`).join('')}
             </div>
             <div class="rmq-tier" role="tablist">
-                <button type="button" data-tier="pro" class="${tier === 'pro' ? 'is-active' : ''}"><span class="rmq-pro">PRO</span>PRO-пользователи<span class="rmq-count" data-count-tier="pro" hidden></span></button>
-                <button type="button" data-tier="regular" class="${tier === 'regular' ? 'is-active' : ''}">Обычные<span class="rmq-count" data-count-tier="regular" hidden></span></button>
+                <button type="button" data-tier="pro"><span class="rmq-pro">PRO</span>PRO-пользователи<span class="rmq-count" data-count-tier="pro" hidden></span></button>
+                <button type="button" data-tier="regular">Обычные<span class="rmq-count" data-count-tier="regular" hidden></span></button>
             </div>`;
         bar.addEventListener('click', (e) => {
+            const { kind, tier } = currentSegment();
             const k = e.target.closest('[data-kind]')?.dataset.kind;
             const t = e.target.closest('[data-tier]')?.dataset.tier;
-            if (k && k !== kind) goSegment(k, tier);
-            if (t && t !== tier) goSegment(kind, t);
+            if (k && k !== kind) setSegment(k, tier);
+            if (t && t !== tier) setSegment(kind, t);
         });
-
-        // Альбомы/Синглы — сумма PRO+обычных; PRO/Обычные — внутри выбранного типа.
-        qsa('[data-count-kind]', bar).forEach((el) => {
-            const s = SEGMENTS[el.dataset.countKind];
-            Promise.all([countSegment(s.pro), countSegment(s.regular)])
-                .then(([a, b]) => { el.textContent = a + b; el.hidden = false; })
-                .catch(() => el.remove());
-        });
-        qsa('[data-count-tier]', bar).forEach((el) => fillCount(el, SEGMENTS[kind][el.dataset.countTier]));
         return bar;
+    }
+
+    function updateBar() {
+        const bar = qs('.rmq-bar');
+        if (!bar) return;
+        const { kind, tier } = currentSegment();
+        qsa('[data-kind]', bar).forEach((b) => b.classList.toggle('is-active', b.dataset.kind === kind));
+        qsa('[data-tier]', bar).forEach((b) => b.classList.toggle('is-active', b.dataset.tier === tier));
+        if (!queueData) return;
+        const pending = queueData.filter((it) => !doneHrefs.has(it.href));
+        qsa('[data-count-kind]', bar).forEach((el) => {
+            el.textContent = pending.filter((it) => it.kind === el.dataset.countKind).length;
+            el.hidden = false;
+        });
+        qsa('[data-count-tier]', bar).forEach((el) => {
+            el.textContent = pending.filter((it) => inSegment(it, kind, el.dataset.countTier)).length;
+            el.hidden = false;
+        });
     }
 
     /* ---------- карточки релизов во встроенных рамках ---------- */
 
     const SKELETON = `<div class="rmq-skel"><div class="rmq-skel-head"><i></i><div style="flex:1;display:flex;flex-direction:column;gap:10px"><i style="width:40%"></i><i style="width:25%"></i></div></div>
         <i style="width:100%;height:120px;border-radius:14px"></i><i style="width:70%"></i><i style="width:55%"></i></div>`;
-
-    function frameHrefOf(row) {
-        return qs('a[href*="/moderation/release/"]', row)?.getAttribute('href') || '';
-    }
 
     function releasePathOf(href) {
         return (href.match(/\/moderation\/release\/[^/?#]+/) || [])[0] || '';
@@ -351,17 +374,19 @@
         const markDone = (path) => {
             if (card.dataset.done) return;
             card.dataset.done = '1';
-            card.innerHTML = `<div class="rmq-done"><span>✓</span><span><b>Релиз обработан</b> — страница релиза закрылась (решение принято).</span>
+            card.classList.remove('rmq-hidden');
+            card.innerHTML = `<div class="rmq-done"><span>✓</span><span><b>Релиз обработан</b> — открываю следующий…</span>
                 <a href="${releasePath}" target="_blank" rel="noopener">Открыть релиз ↗</a></div>`;
-            countCache.clear();
-            refreshCounts();
             void path;
             doneHrefs.add(href);
+            updateBar();
             // через секунду — следующий релиз (индекс тот же: обработанный выпал из списка)
             setTimeout(() => {
                 card.remove();
                 cardsByHref.delete(href);
-                if (lastTable && lastList) syncCards(lastTable, lastList);
+                renderQueue();
+                // подтянуть свежую очередь (могли прийти новые релизы)
+                loadQueue(true).then(() => renderQueue()).catch(() => {});
             }, 1200);
         };
 
@@ -441,13 +466,13 @@
     // и сервер не получает 12 тяжёлых страниц разом. (Не зависим от видимости вкладки.)
     const LOAD_PARALLEL = 2;
     let loadingNow = 0;
-    const loadQueue = [];
+    const frameQueue = [];
 
     function pumpLoads() {
         // порядок загрузки — как карточки на странице (сортируем здесь: при постановке в очередь карточки ещё не в DOM)
-        loadQueue.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-        while (loadingNow < LOAD_PARALLEL && loadQueue.length) {
-            const iframe = loadQueue.shift();
+        frameQueue.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        while (loadingNow < LOAD_PARALLEL && frameQueue.length) {
+            const iframe = frameQueue.shift();
             if (!iframe.isConnected || iframe.getAttribute('src')) continue;
             loadingNow++;
             let finished = false;
@@ -464,7 +489,7 @@
     }
 
     function queueLoad(iframe) {
-        loadQueue.push(iframe);
+        frameQueue.push(iframe);
         setTimeout(pumpLoads, 0);
     }
 
@@ -482,45 +507,27 @@
 
     // На странице — один релиз (как на старом сайте): «Релиз 2 из 6» и стрелки ‹ ›.
     // Грузим текущий и заранее следующий. После решения — сразу следующий.
+    // На странице — один релиз (как на старом сайте): «Релиз 2 из 6» и стрелки ‹ ›.
+    // Грузим текущий и заранее следующий. После решения — сразу следующий.
     const cardsByHref = new Map();
     const doneHrefs = new Set();
     let viewIndex = 0;
-    let lastTable = null;
-    let lastList = null;
-
-    function pendingHrefs(table) {
-        return qsa('tbody tr', table).filter(isPending).map(frameHrefOf).filter((h) => h && !doneHrefs.has(h));
-    }
-
-    function siteHasNextPage(table) {
-        return qsa('tbody tr', table).length >= PAGE_SIZE;
-    }
-
-    function goPage(delta) {
-        const url = new URL(location.href);
-        const page = Math.max(1, Number(url.searchParams.get('page') || 1) + delta);
-        url.searchParams.set('page', String(page));
-        location.href = url.toString();
-    }
 
     function ensureCard(href) {
         if (!cardsByHref.has(href)) cardsByHref.set(href, buildCard(href));
         return cardsByHref.get(href);
     }
 
-    function syncCards(table, list) {
-        lastTable = table;
-        lastList = list;
-        const hrefs = pendingHrefs(table);
-        const page = Number(new URL(location.href).searchParams.get('page') || 1);
-
-        // карточки ушедших из таблицы релизов убираем
-        cardsByHref.forEach((card, href) => {
-            if (!hrefs.includes(href) && !card.dataset.done) {
-                card.remove();
-                cardsByHref.delete(href);
-            }
-        });
+    function renderQueue() {
+        updateBar();
+        const list = qs('.rmq-list');
+        if (!list) return;
+        if (!queueData) {
+            if (!qs('.rmq-empty', list)) list.innerHTML = '<div class="rmq-empty">Загружаю очередь…</div>';
+            return;
+        }
+        const { kind, tier } = currentSegment();
+        const hrefs = queueData.filter((it) => inSegment(it, kind, tier) && !doneHrefs.has(it.href)).map((it) => it.href);
 
         let nav = qs(':scope > .rmq-nav', list);
         let empty = qs(':scope > .rmq-empty', list);
@@ -532,10 +539,7 @@
                 empty.className = 'rmq-empty';
                 list.appendChild(empty);
             }
-            empty.innerHTML = siteHasNextPage(table)
-                ? 'На этой странице всё проверено. <button type="button" class="rmq-ghost" data-page="1">Следующая страница →</button>'
-                : 'Нет релизов, ожидающих проверки';
-            qs('[data-page]', empty)?.addEventListener('click', () => goPage(1));
+            empty.textContent = 'Нет релизов, ожидающих проверки';
             return;
         }
         empty?.remove();
@@ -549,38 +553,27 @@
             nav.addEventListener('click', (e) => {
                 const d = Number(e.target.closest('[data-step]')?.dataset.step || 0);
                 if (!d) return;
-                const all = pendingHrefs(lastTable);
-                if (viewIndex + d >= all.length && siteHasNextPage(lastTable)) return goPage(1);
-                if (viewIndex + d < 0 && page > 1) return goPage(-1);
-                viewIndex = Math.min(Math.max(0, viewIndex + d), all.length - 1);
-                syncCards(lastTable, lastList);
+                viewIndex += d;
+                renderQueue();
                 window.scrollTo({ top: list.getBoundingClientRect().top + window.scrollY - 90, behavior: 'smooth' });
             });
             list.prepend(nav);
         }
-        const canPrev = viewIndex > 0 || page > 1;
-        const canNext = viewIndex < hrefs.length - 1 || siteHasNextPage(table);
         nav.innerHTML = `
-            <button type="button" class="rmq-nav-btn" data-step="-1" ${canPrev ? '' : 'disabled'} aria-label="Предыдущий релиз">‹</button>
-            <span>Релиз <b>${viewIndex + 1}</b> из ${hrefs.length}${page > 1 ? ` · стр. ${page}` : ''}</span>
-            <button type="button" class="rmq-nav-btn" data-step="1" ${canNext ? '' : 'disabled'} aria-label="Следующий релиз">›</button>`;
+            <button type="button" class="rmq-nav-btn" data-step="-1" ${viewIndex > 0 ? '' : 'disabled'} aria-label="Предыдущий релиз">‹</button>
+            <span>Релиз <b>${viewIndex + 1}</b> из ${hrefs.length}</span>
+            <button type="button" class="rmq-nav-btn" data-step="1" ${viewIndex < hrefs.length - 1 ? '' : 'disabled'} aria-label="Следующий релиз">›</button>`;
 
         // показываем только текущий; следующий грузится заранее (скрыт)
         const show = ensureCard(current);
         const next = hrefs[viewIndex + 1];
         if (next) ensureCard(next);
         cardsByHref.forEach((card, href) => {
-            const visible = href === current;
-            card.classList.toggle('rmq-hidden', !visible);
+            card.classList.toggle('rmq-hidden', href !== current);
             if (!card.isConnected) list.appendChild(card);
         });
         if (show.previousElementSibling !== nav) nav.after(show);
         show._rmqResize?.();
-    }
-
-    function refreshCounts() {
-        const old = qs('.rmq-bar');
-        if (old) old.replaceWith(buildBar());
     }
 
     /* ---------- окно «Отклонить / Запросить права»: заметка + клише ----------
@@ -628,9 +621,9 @@
                 <div class="rmq-section">
                     <div class="rmq-section-head">
                         <span class="rmq-label">Добавить заметку</span>
-                        <button type="button" class="rmq-ghost rmq-cl-toggle">Клише</button>
+                        <button type="button" class="rmq-ghost rmq-cl-toggle is-open">Скрыть клише</button>
                     </div>
-                    <div class="rmq-cl" hidden>
+                    <div class="rmq-cl">
                         <div class="rmq-cl-top">
                             <input type="text" class="rmq-cl-search" placeholder="Поиск клише…">
                             <a class="rmq-cl-manage" href="${CLISHE_MANAGE_URL}" target="_blank" rel="noopener">Добавить / изменить ↗</a>
@@ -680,9 +673,7 @@
         };
         const onKey = (e) => {
             if (e.key !== 'Escape') return;
-            const panel = qs('.rmq-cl', overlay);
-            if (!panel.hidden) { panel.hidden = true; qs('.rmq-cl-toggle', overlay).classList.remove('is-open'); }
-            else close();
+            close();
         };
         document.addEventListener('keydown', onKey, true);
         overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
@@ -706,7 +697,7 @@
             ta.focus();
         });
         setMode(mode);
-        ta.focus();
+        qs('.rmq-cl-search', overlay).focus(); // сразу можно искать клише
     }
 
     function bindClishe(root, onInsert) {
@@ -743,14 +734,17 @@
                 list.innerHTML = `<div class="rmq-cl-empty">Не удалось загрузить клише: ${esc(err.message || err)}</div>`;
             }
         };
+        const setOpen = (open) => {
+            box.hidden = !open;
+            toggle.classList.toggle('is-open', open);
+            toggle.textContent = open ? 'Скрыть клише' : 'Клише';
+            if (open && !items) load(false);
+        };
         toggle.addEventListener('click', () => {
-            box.hidden = !box.hidden;
-            toggle.classList.toggle('is-open', !box.hidden);
-            if (!box.hidden) {
-                search.focus();
-                if (!items) load(false);
-            }
+            setOpen(box.hidden);
+            if (!box.hidden) search.focus();
         });
+        setOpen(true); // список клише виден сразу
         search.addEventListener('input', render);
         list.addEventListener('click', (e) => {
             const id = e.target.closest('.rmq-cl-item')?.dataset.id;
@@ -766,8 +760,6 @@
             onInsert(chosen.length > 1 ? chosen.map((p, i) => `${i + 1}. ${p.text}`).join('\n\n') : chosen[0].text);
             picked.length = 0;
             search.value = '';
-            box.hidden = true;
-            toggle.classList.remove('is-open');
             render();
         });
     }
@@ -776,9 +768,11 @@
 
     function enhanceQueue() {
         if (location.pathname !== '/moderation') return;
+        const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)');
         const table = qs('main table');
         const statusTabs = qsa('main button').find((b) => b.textContent.trim() === 'Все')?.parentElement?.parentElement;
-        if (!table || !statusTabs) return;
+        if (!content || !table || !statusTabs) return;
+        if (qs('.rmq-bar') && qs('.rmq-list')) return; // уже настроено
 
         if (!qs('#rmq-style')) {
             const st = document.createElement('style');
@@ -787,30 +781,30 @@
             document.head.appendChild(st);
         }
 
-        // уже настроено для этой таблицы (React мог пересоздать её при переходе — тогда настроим заново)
-        if (table.dataset.rmqObserved && qs('.rmq-list') && qs('.rmq-bar')) return;
-
-        // вкладки статуса и фильтр сайта заменяем своими вкладками (показываем только «Ожидает»)
+        // убираем: заголовок «Очередь на модерацию», блок статистики, поиск, вкладки статуса,
+        // таблицу и пагинацию сайта — вместо них наши вкладки и один релиз
+        const h1 = qsa('h1', content).find((h) => /Очередь на модерацию/.test(h.textContent));
+        h1?.parentElement?.classList.add('rmq-hidden');
+        qsa('div', content)
+            .filter((d) => /Отклонено сегодня/i.test(d.textContent) && /Одобрено сегодня/i.test(d.textContent) && d.textContent.length < 160)
+            .filter((d, _, arr) => !arr.some((o) => o !== d && d.contains(o)))
+            .forEach((d) => d.classList.add('rmq-hidden'));
+        qs('input[placeholder*="Поиск"]', content)?.parentElement?.classList.add('rmq-hidden');
         statusTabs.classList.add('rmq-hidden');
-        qs('.rmq-bar')?.remove();
-        statusTabs.before(buildBar());
-
-        // таблицу прячем (React продолжает её обновлять — по ней и строим карточки)
-        const tableWrap = table.closest('.overflow-x-auto') || table;
-        tableWrap.classList.add('rmq-hidden');
-        // пагинация сайта («Результатов на странице… 1–12 из 16») — у нас своя «Релиз N из M»
+        (table.closest('.overflow-x-auto') || table).classList.add('rmq-hidden');
         const isPager = (d) => /Результатов на странице/.test(d.textContent) && /\d+\s*–\s*\d+\s*из\s*\d+/.test(d.textContent) && d.textContent.length < 200;
-        qsa('main div').filter(isPager).filter((d) => !qsa('div', d).some(isPager)).forEach((d) => d.classList.add('rmq-hidden'));
-        let list = qs('.rmq-list');
-        if (!list) {
-            list = document.createElement('div');
-            list.className = 'rmq-list';
-        }
-        if (list.previousElementSibling !== tableWrap) tableWrap.after(list);
-        syncCards(table, list);
+        qsa('div', content).filter(isPager).filter((d) => !qsa('div', d).some(isPager)).forEach((d) => d.classList.add('rmq-hidden'));
 
-        table.dataset.rmqObserved = '1';
-        new MutationObserver(() => syncCards(table, list)).observe(table, { childList: true, subtree: true, characterData: true });
+        const bar = buildBar();
+        const list = document.createElement('div');
+        list.className = 'rmq-list';
+        statusTabs.before(bar);
+        bar.after(list);
+
+        renderQueue();
+        loadQueue().then(() => renderQueue()).catch((err) => {
+            list.innerHTML = `<div class="rmq-empty">Не удалось загрузить очередь: ${esc(err.message || err)}</div>`;
+        });
     }
 
     // Next.js переходит между страницами без перезагрузки — перепроверяем при изменениях.
