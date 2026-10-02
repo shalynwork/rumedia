@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.3.2
+// @version      0.4.0
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -134,6 +134,9 @@
         main > div.rounded-\\[20px\\]:not(.fixed) { min-height:0 !important; border-radius:0 !important; overflow:visible !important; }
         next-route-announcer { display:none !important; }
         .rmq-x { display:none !important; }
+        .rmq-sent { display:inline-flex; align-items:center; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:500;
+            background:#f2f3f7; color:#626c77; cursor:help; }
+        .rmq-sent.is-old { background:#fff4e5; color:#b7791f; }
         .rmq-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; }
         .rmq-act { padding:10px 20px; border:1px solid transparent; border-radius:12px; cursor:pointer; font:inherit; font-size:14px; font-weight:500; }
         .rmq-act--reject { background:#fff; border-color:#f3c4c4; color:#d64545; }
@@ -153,6 +156,7 @@
     // Что убираем из карточки релиза (по подписям-заголовкам блоков сайта).
     const HIDE_SECTIONS = ['нарушения', 'добавить заметку'];            // целые блоки
     const HIDE_SUBSECTIONS = ['статистика', 'отправитель', 'техническое', 'идентификаторы']; // подразделы метаданных и треков
+    const HIDE_FIELDS = ['тип', 'количество треков'];                                      // отдельные поля метаданных
 
     const qs = (sel, root = document) => root.querySelector(sel);
     const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -278,6 +282,14 @@
             if (!p.children.length && /^ID\s+[0-9a-f-]{20,}/i.test(p.textContent.trim())) p.classList.add('rmq-x');
         });
 
+        // отдельные поля «подпись — значение»
+        qsa('div.flex.min-w-0.flex-col > span.text-secondary.text-xs:first-child', content).forEach((lab) => {
+            if (HIDE_FIELDS.includes(labelOf(lab))) lab.parentElement.classList.add('rmq-x');
+        });
+
+        // когда отправлен на модерацию — бейдж рядом с названием
+        showSentBadge(doc, content);
+
         // заголовки блоков (p.mini-label) и подразделов метаданных/треков (p.uppercase)
         qsa('p.mini-label, p.uppercase', content).forEach((label) => {
             const name = labelOf(label);
@@ -362,6 +374,51 @@
         btn.textContent = open ? 'Свернуть' : `Показать${rows ? ` (${rows})` : ''}`;
         section.classList.add('rmq-hist');
         label.classList.toggle('rmq-hist-label-closed', !open);
+    }
+
+    // «Отправлен на модерацию: 23.08.2026 17:55» (поле из скрытого «Отправителя») → понятный бейдж у названия.
+    function showSentBadge(doc, content) {
+        const lab = qsa('span.text-secondary.text-xs', content).find((sp) => labelOf(sp) === 'отправлен на модерацию');
+        const m = (lab?.nextElementSibling?.textContent || '').match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})/);
+        const row = qs('h1', content)?.parentElement;
+        if (!m || !row) return;
+        const date = new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]);
+        let badge = qs(':scope > .rmq-sent', row);
+        if (!badge) {
+            badge = doc.createElement('span');
+            badge.className = 'rmq-sent';
+            row.appendChild(badge);
+        }
+        const text = `Отправлен ${sentAgo(date)}`;
+        if (badge.textContent !== text) badge.textContent = text;
+        badge.title = `Отправлен на модерацию ${m[1]}.${m[2]}.${m[3]} в ${m[4].padStart(2, '0')}:${m[5]}`;
+        badge.classList.toggle('is-old', Date.now() - date.getTime() >= 2 * 86400000);
+    }
+
+    const plural = (n, f) => {
+        const a = Math.abs(n) % 100;
+        const l = a % 10;
+        return a > 10 && a < 20 ? f[2] : l > 1 && l < 5 ? f[1] : l === 1 ? f[0] : f[2];
+    };
+
+    // «только что» / «15 минут назад» / «сегодня в 13:12» / «вчера в 23:40» /
+    // «1 день и 10 часов назад» / «2 дня и 3 часа назад» / «9 дней назад» (неделя и больше — без часов)
+    function sentAgo(date) {
+        const pad = (x) => String(x).padStart(2, '0');
+        const at = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const mins = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+        if (mins < 1) return 'только что';
+        if (mins < 60) return `${mins} ${plural(mins, ['минуту', 'минуты', 'минут'])} назад`;
+        const today = new Date();
+        const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+        if (sameDay(date, today)) return `сегодня в ${at}`;
+        const hoursTotal = Math.floor(mins / 60);
+        if (hoursTotal < 24) return `вчера в ${at}`;
+        const days = Math.floor(hoursTotal / 24);
+        const hours = hoursTotal % 24;
+        const d = `${days} ${plural(days, ['день', 'дня', 'дней'])}`;
+        if (days >= 7 || !hours) return `${d} назад`;
+        return `${d} и ${hours} ${plural(hours, ['час', 'часа', 'часов'])} назад`;
     }
 
     function releaseInfoOf(doc, ctx) {
