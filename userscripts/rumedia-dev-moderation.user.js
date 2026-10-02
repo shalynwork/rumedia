@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.3.0
+// @version      0.3.1
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -66,12 +66,6 @@
         .rmq-done a { margin-left:auto; color:#fa40a2; font-size:13px; font-weight:500; text-decoration:none; }
         .rmq-empty { padding:28px 0; text-align:center; font-size:14px; color:#626c77; }
         .rmq-empty .rmq-ghost { margin-left:8px; }
-        .rmq-nav { display:flex; align-items:center; justify-content:center; gap:14px; font-size:13px; color:#626c77; }
-        .rmq-nav b { color:#1d2023; }
-        .rmq-nav-btn { width:32px; height:32px; border:1px solid #d9d9d9; border-radius:10px; background:#fff; cursor:pointer;
-            font-size:18px; line-height:1; color:#1d2023; }
-        .rmq-nav-btn:hover:not(:disabled) { background:#fbf5f8; color:#fa40a2; }
-        .rmq-nav-btn:disabled { opacity:.35; cursor:default; }
 
         /* окно решения (Отклонить / Запросить права) — в стиле сайта */
         .rmq-overlay { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;
@@ -148,7 +142,8 @@
         .rmq-act--rights:hover { background:#fff7e6; }
         .rmq-act--approve { background:#2fb26b; color:#fff; }
         .rmq-act--approve:hover { opacity:.9; }
-        section.rmq-hist { position:relative; }
+        section.rmq-hist { position:relative; order:1; }   /* «История модерации» — после треков */
+        .rmq-actions { order:2; }                          /* кнопки — в самом конце */
         .rmq-hist-label-closed { margin-bottom:0 !important; }
         .rmq-hist-toggle { position:absolute; top:12px; right:12px; padding:4px 10px; border:1px solid #d9d9d9; border-radius:8px;
             background:#fff; cursor:pointer; font:inherit; font-size:12px; font-weight:500; color:#1d2023; }
@@ -157,7 +152,7 @@
 
     // Что убираем из карточки релиза (по подписям-заголовкам блоков сайта).
     const HIDE_SECTIONS = ['нарушения', 'добавить заметку'];            // целые блоки
-    const HIDE_SUBSECTIONS = ['статистика', 'отправитель', 'техническое']; // подразделы метаданных и треков
+    const HIDE_SUBSECTIONS = ['статистика', 'отправитель', 'техническое', 'идентификаторы']; // подразделы метаданных и треков
 
     const qs = (sel, root = document) => root.querySelector(sel);
     const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -174,7 +169,6 @@
         url.searchParams.set('segment', SEGMENTS[kind][tier]);
         url.searchParams.delete('page');
         history.replaceState(history.state, '', url.toString());
-        viewIndex = 0;
         renderQueue();
     }
 
@@ -505,13 +499,10 @@
         return card;
     }
 
-    // На странице — один релиз (как на старом сайте): «Релиз 2 из 6» и стрелки ‹ ›.
-    // Грузим текущий и заранее следующий. После решения — сразу следующий.
-    // На странице — один релиз (как на старом сайте): «Релиз 2 из 6» и стрелки ‹ ›.
-    // Грузим текущий и заранее следующий. После решения — сразу следующий.
+    // На странице — один релиз (как на старом сайте). Грузим текущий и заранее следующий.
+    // После решения — сразу следующий.
     const cardsByHref = new Map();
     const doneHrefs = new Set();
-    let viewIndex = 0;
 
     function ensureCard(href) {
         if (!cardsByHref.has(href)) cardsByHref.set(href, buildCard(href));
@@ -529,10 +520,8 @@
         const { kind, tier } = currentSegment();
         const hrefs = queueData.filter((it) => inSegment(it, kind, tier) && !doneHrefs.has(it.href)).map((it) => it.href);
 
-        let nav = qs(':scope > .rmq-nav', list);
         let empty = qs(':scope > .rmq-empty', list);
         if (!hrefs.length) {
-            nav?.remove();
             cardsByHref.forEach((card) => { if (!card.dataset.done) card.classList.add('rmq-hidden'); });
             if (!empty) {
                 empty = document.createElement('div');
@@ -544,35 +533,18 @@
         }
         empty?.remove();
 
-        viewIndex = Math.min(Math.max(0, viewIndex), hrefs.length - 1);
-        const current = hrefs[viewIndex];
-
-        if (!nav) {
-            nav = document.createElement('div');
-            nav.className = 'rmq-nav';
-            nav.addEventListener('click', (e) => {
-                const d = Number(e.target.closest('[data-step]')?.dataset.step || 0);
-                if (!d) return;
-                viewIndex += d;
-                renderQueue();
-                window.scrollTo({ top: list.getBoundingClientRect().top + window.scrollY - 90, behavior: 'smooth' });
-            });
-            list.prepend(nav);
-        }
-        nav.innerHTML = `
-            <button type="button" class="rmq-nav-btn" data-step="-1" ${viewIndex > 0 ? '' : 'disabled'} aria-label="Предыдущий релиз">‹</button>
-            <span>Релиз <b>${viewIndex + 1}</b> из ${hrefs.length}</span>
-            <button type="button" class="rmq-nav-btn" data-step="1" ${viewIndex < hrefs.length - 1 ? '' : 'disabled'} aria-label="Следующий релиз">›</button>`;
+        // всегда первый ожидающий релиз; после решения он выпадает из списка — и показывается следующий
+        const current = hrefs[0];
 
         // показываем только текущий; следующий грузится заранее (скрыт)
         const show = ensureCard(current);
-        const next = hrefs[viewIndex + 1];
+        const next = hrefs[1];
         if (next) ensureCard(next);
         cardsByHref.forEach((card, href) => {
             card.classList.toggle('rmq-hidden', href !== current);
             if (!card.isConnected) list.appendChild(card);
         });
-        if (show.previousElementSibling !== nav) nav.after(show);
+        if (list.firstElementChild !== show) list.prepend(show);
         show._rmqResize?.();
     }
 
