@@ -72,7 +72,7 @@
         body > div.fixed.top-0 { display:none !important; }
         main { padding:0 !important; min-height:0 !important; background:#fff !important; display:block !important; }
         main > div.fixed { display:none !important; }
-        main > div.rounded-\\[20px\\] { min-height:0 !important; border-radius:0 !important; overflow:visible !important; }
+        main > div.rounded-\\[20px\\]:not(.fixed) { min-height:0 !important; border-radius:0 !important; overflow:visible !important; }
         next-route-announcer { display:none !important; }
     `;
 
@@ -174,7 +174,8 @@
         const resize = () => {
             const doc = iframe.contentDocument;
             if (!doc?.body) return;
-            const content = qs('main > div.rounded-\\[20px\\]', doc) || doc.body;
+            // у бокового меню тоже rounded-[20px], но оно fixed — берём содержимое
+            const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)', doc) || doc.body;
             const h = Math.ceil(content.getBoundingClientRect().height);
             if (h > 60) iframe.style.height = `${h}px`;
         };
@@ -192,7 +193,8 @@
         const onLoad = () => {
             const doc = iframe.contentDocument;
             const win = iframe.contentWindow;
-            if (!doc || !win) return;
+            // пустая рамка (about:blank) до установки src тоже шлёт load — её пропускаем
+            if (!doc || !win || !iframe.getAttribute('src') || win.location.href === 'about:blank') return;
             if (!win.location.pathname.startsWith(releasePath)) return markDone(win.location.pathname);
 
             if (!qs('#rmq-frame-style', doc)) {
@@ -245,24 +247,46 @@
         iframe.addEventListener('load', onLoad);
     }
 
-    const lazy = new IntersectionObserver((entries) => {
-        entries.forEach((en) => {
-            if (!en.isIntersecting) return;
-            const iframe = qs('iframe', en.target);
-            if (iframe && !iframe.src) iframe.src = iframe.dataset.src;
-            lazy.unobserve(en.target);
-        });
-    }, { rootMargin: '1200px 0px' });
+    // Очередь загрузки рамок: сверху вниз, по 2 одновременно — первый релиз виден быстрее,
+    // и сервер не получает 12 тяжёлых страниц разом. (Не зависим от видимости вкладки.)
+    const LOAD_PARALLEL = 2;
+    let loadingNow = 0;
+    const loadQueue = [];
+
+    function pumpLoads() {
+        // порядок загрузки — как карточки на странице (сортируем здесь: при постановке в очередь карточки ещё не в DOM)
+        loadQueue.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        while (loadingNow < LOAD_PARALLEL && loadQueue.length) {
+            const iframe = loadQueue.shift();
+            if (!iframe.isConnected || iframe.getAttribute('src')) continue;
+            loadingNow++;
+            let finished = false;
+            const done = () => {
+                if (finished) return;
+                finished = true;
+                loadingNow--;
+                pumpLoads();
+            };
+            iframe.addEventListener('load', done, { once: true });
+            setTimeout(done, 20000); // не ждём вечно зависшую страницу
+            iframe.setAttribute('src', iframe.dataset.src);
+        }
+    }
+
+    function queueLoad(iframe) {
+        loadQueue.push(iframe);
+        setTimeout(pumpLoads, 0);
+    }
 
     function buildCard(href) {
         const card = document.createElement('div');
         card.className = 'rmq-card is-loading';
         card.dataset.href = href;
-        card.innerHTML = `${SKELETON}<iframe title="Релиз" loading="lazy"></iframe>`;
+        card.innerHTML = `${SKELETON}<iframe title="Релиз"></iframe>`;
         const iframe = qs('iframe', card);
         iframe.dataset.src = href;
         setupFrame(card, iframe, href);
-        lazy.observe(card);
+        queueLoad(iframe);
         return card;
     }
 
