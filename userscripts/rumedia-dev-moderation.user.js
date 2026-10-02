@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -272,7 +272,8 @@
             if (name === 'история модерации') collapseHistory(doc, label);
         });
 
-        // панель решения сайта («Нарушений не отмечено… / Одобрить») → наши три кнопки
+        // панель решения сайта («Нарушений не отмечено… / Одобрить») → наши две кнопки
+        // («Отклонить / Запросить права» открывает окно, режим переключается внутри)
         const approve = qsa('button', content).find((b) => b.textContent.trim() === 'Одобрить' && !b.closest('.rmq-actions'));
         const siteBar = approve?.parentElement;
         if (siteBar && !siteBar.classList.contains('rmq-x')) {
@@ -282,8 +283,7 @@
             const bar = doc.createElement('div');
             bar.className = 'rmq-actions';
             bar.innerHTML = `
-                <button type="button" class="rmq-act rmq-act--reject" data-act="reject">Отклонить</button>
-                <button type="button" class="rmq-act rmq-act--rights" data-act="rights">Запросить права</button>
+                <button type="button" class="rmq-act rmq-act--reject" data-act="reject">Отклонить / Запросить права</button>
                 <button type="button" class="rmq-act rmq-act--approve" data-act="approve">Одобрить</button>`;
             bar.addEventListener('click', (e) => {
                 const act = e.target.closest('[data-act]')?.dataset.act;
