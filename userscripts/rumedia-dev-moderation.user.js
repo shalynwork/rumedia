@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.3.1
+// @version      0.3.2
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -288,6 +288,27 @@
             // «История модерации» — свёрнута, раскрывается по кнопке
             if (name === 'история модерации') collapseHistory(doc, label);
         });
+
+        // данные треков по умолчанию свёрнуты: один раз жмём «Свернуть данные трека» у развёрнутых.
+        // (до «оживления» React клик не работает — тогда повторим при следующей перерисовке)
+        const root = doc.documentElement;
+        if (!root.dataset.rmqTracksCollapsed && Date.now() - Number(root.dataset.rmqTracksTry || 0) > 500) {
+            const expanded = qsa('button[aria-expanded="true"][title*="Свернуть данные трека"]', content);
+            const tries = Number(root.dataset.rmqTracksTries || 0);
+            if (expanded.length && tries >= 10) {
+                root.dataset.rmqTracksCollapsed = '1'; // не вышло — больше не пытаемся
+            } else if (expanded.length) {
+                root.dataset.rmqTracksTries = String(tries + 1);
+                root.dataset.rmqTracksTry = String(Date.now());
+                expanded.forEach((b) => b.click());
+                doc.defaultView.setTimeout(() => {
+                    if (!qsa('button[aria-expanded="true"][title*="Свернуть данные трека"]', content).length) root.dataset.rmqTracksCollapsed = '1';
+                    else tidyFrame(doc, ctx);
+                }, 600);
+            } else if (qs('button[aria-expanded][title*="данные трека"]', content)) {
+                root.dataset.rmqTracksCollapsed = '1';
+            }
+        }
 
         // панель решения сайта («Нарушений не отмечено… / Одобрить») → наши две кнопки
         // («Отклонить / Запросить права» открывает окно, режим переключается внутри)
