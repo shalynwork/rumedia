@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.4.0
+// @version      0.4.1
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -71,15 +71,22 @@
         .rmq-overlay { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;
             background:rgb(29 32 35 / .4); animation:rmq-fade .15s ease; }
         @keyframes rmq-fade { from { opacity:0; } }
-        .rmq-modal { width:min(600px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:20px; padding:24px;
-            box-shadow:0 20px 50px rgb(29 32 35 / .2); color:#1d2023; font-family:inherit; }
+        /* окно целиком помещается в экран: кнопки внизу всегда видны, прокручивается только список клише */
+        .rmq-modal { width:min(640px, 96vw); max-height:calc(100vh - 40px); display:flex; flex-direction:column; overflow:hidden;
+            background:#fff; border-radius:20px; padding:20px 24px; box-shadow:0 20px 50px rgb(29 32 35 / .2); color:#1d2023; font-family:inherit; }
+        .rmq-modal > * { flex:none; }
+        .rmq-modal > .rmq-section { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+        .rmq-section > .rmq-cl { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+        .rmq-section > .rmq-cl[hidden] { display:none; }
+        .rmq-cl > .rmq-cl-list { flex:1 1 auto; min-height:90px; max-height:none !important; }
+        .rmq-section > .rmq-prefix, .rmq-section > textarea { flex:none; }
         .rmq-modal h3 { margin:0; font-size:20px; font-weight:600; }
         .rmq-modal .rmq-sub { margin-top:4px; font-size:13px; color:#626c77; }
-        .rmq-mode { display:inline-flex; gap:2px; margin:18px 0 14px; padding:3px; border-radius:12px; background:#f2f3f7; }
+        .rmq-mode { display:inline-flex; align-self:flex-start; gap:2px; margin:14px 0 12px; padding:3px; border-radius:12px; background:#f2f3f7; }
         .rmq-mode button { height:32px; padding:0 14px; border:none; border-radius:9px; background:transparent; cursor:pointer;
             font:inherit; font-size:13px; font-weight:500; color:#626c77; }
         .rmq-mode button.is-active { background:#fff; color:#1d2023; box-shadow:0 1px 2px rgb(0 0 0 / .08); }
-        .rmq-section { border:1px solid rgb(188 195 208 / .5); border-radius:16px; padding:16px; }
+        .rmq-section { border:1px solid rgb(188 195 208 / .5); border-radius:16px; padding:14px 16px; }
         .rmq-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
         .rmq-label { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#6b1e45; }
         .rmq-ghost { padding:6px 12px; border:1px solid #d9d9d9; border-radius:8px; background:#fff; cursor:pointer;
@@ -87,10 +94,10 @@
         .rmq-ghost:hover, .rmq-ghost.is-open { background:#fbf5f8; }
         .rmq-prefix { padding:10px 14px; border:1px solid #d9d9d9; border-bottom:none; border-radius:12px 12px 0 0;
             background:#fbf5f8; font-size:13px; line-height:1.45; color:#626c77; }
-        .rmq-modal textarea { display:block; width:100%; min-height:130px; box-sizing:border-box; resize:vertical; padding:12px 16px;
+        .rmq-modal textarea { display:block; width:100%; min-height:96px; height:110px; box-sizing:border-box; resize:vertical; padding:12px 16px;
             border:1px solid #d9d9d9; border-radius:0 0 12px 12px; outline:none; font:inherit; font-size:14px; line-height:1.5; color:#1e1e1e; }
         .rmq-modal textarea:focus { border-color:#fa40a2; }
-        .rmq-foot { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:18px; }
+        .rmq-foot { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:14px; }
         .rmq-status { margin-right:auto; font-size:13px; color:#626c77; }
         .rmq-status.is-warn { color:#b7791f; }
         .rmq-btn { padding:10px 20px; border:1px solid transparent; border-radius:12px; cursor:pointer; font:inherit; font-size:14px; font-weight:500; }
