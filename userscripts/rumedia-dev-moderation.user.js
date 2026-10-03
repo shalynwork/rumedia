@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RuMedia Moderation (new site)
 // @namespace    https://dev.rumedia.io/
-// @version      0.4.1
+// @version      0.5.0
 // @description  Очередь модерации на новом сайте: вкладки Альбомы/Синглы и PRO/Обычные, только релизы «Ожидает», вся информация о релизе сразу на странице.
 // @author       Ruslan
 // @match        https://dev.rumedia.io/moderation*
@@ -132,13 +132,13 @@
         .rmq-cl-empty { padding:16px 14px; font-size:13px; color:#626c77; }
     `;
 
-    // Внутри рамки прячем шапку, меню и «Назад к очереди» — остаётся только содержимое релиза.
+    // Внутри рамки оставляем только блок релиза: всё рядом с ним (шапка, меню, обёртки) скрывает isolateContent —
+    // по положению в дереве, а не по классам, чтобы обновления вёрстки сайта ничего не ломали.
     const FRAME_STYLE = `
         html, body { background:#fff !important; min-height:0 !important; height:auto !important; overflow:hidden !important; }
-        body > div.fixed.top-0 { display:none !important; }
-        main { padding:0 !important; min-height:0 !important; background:#fff !important; display:block !important; }
-        main > div.fixed { display:none !important; }
-        main > div.rounded-\\[20px\\]:not(.fixed) { min-height:0 !important; border-radius:0 !important; overflow:visible !important; }
+        .rmq-anc { padding:0 !important; margin:0 !important; min-height:0 !important; background:#fff !important;
+            display:block !important; transform:none !important; }
+        .rmq-content { min-height:0 !important; border-radius:0 !important; overflow:visible !important; }
         next-route-announcer { display:none !important; }
         .rmq-x { display:none !important; }
         .rmq-sent { display:inline-flex; align-items:center; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:500;
@@ -279,10 +279,37 @@
 
     const labelOf = (el) => (el?.textContent || '').trim().toLowerCase();
 
+    // Блок релиза = предок заголовка h1, лежащий прямо в <main> (или в <body>, если <main> нет).
+    function frameContent(doc) {
+        const h1 = qs('main h1', doc) || qs('h1', doc);
+        if (!h1) return null;
+        const stop = h1.closest('main') || doc.body;
+        let el = h1;
+        while (el.parentElement && el.parentElement !== stop) el = el.parentElement;
+        return el;
+    }
+
+    // Скрываем всех соседей блока на каждом уровне вверх до <body>; у предков убираем отступы.
+    function isolateContent(doc, content) {
+        content.classList.add('rmq-content');
+        for (let el = content; el && el !== doc.body; el = el.parentElement) {
+            const parent = el.parentElement;
+            if (!parent) break;
+            Array.from(parent.children).forEach((sib) => {
+                if (sib === el || /^(SCRIPT|STYLE|LINK|META|TEMPLATE)$/.test(sib.tagName)) return;
+                sib.classList.add('rmq-x');
+            });
+            if (parent !== doc.body) parent.classList.add('rmq-anc');
+        }
+        // «← Назад» (раньше «Назад к очереди») в рамке не нужна
+        qsa('a, button', content).forEach((a) => { if (/^\s*←?\s*Назад/.test(a.textContent)) a.classList.add('rmq-x'); });
+    }
+
     // Приводим страницу релиза в рамке к нужному виду. Вызывается при загрузке и после каждой перерисовки React.
     function tidyFrame(doc, ctx) {
-        const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)', doc);
+        const content = frameContent(doc);
         if (!content) return;
+        isolateContent(doc, content);
 
         // ID релиза
         qsa('p', content).forEach((p) => {
@@ -429,7 +456,7 @@
     }
 
     function releaseInfoOf(doc, ctx) {
-        const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)', doc);
+        const content = frameContent(doc) || doc.body;
         const title = (qs('h1', content)?.textContent || '').trim();
         // владелец — ссылка на пользователя без звёздочки рейтинга
         const owner = qsa('a[href*="/moderation/users/"]', content).find((a) => !/★/.test(a.textContent))?.textContent.trim() || '';
@@ -444,8 +471,7 @@
         const resize = () => {
             const doc = iframe.contentDocument;
             if (!doc?.body) return;
-            // у бокового меню тоже rounded-[20px], но оно fixed — берём содержимое
-            const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)', doc) || doc.body;
+            const content = frameContent(doc) || doc.body;
             const h = Math.ceil(content.getBoundingClientRect().height);
             if (h > 60) iframe.style.height = `${h}px`;
         };
@@ -482,8 +508,6 @@
                 st.textContent = FRAME_STYLE;
                 doc.head.appendChild(st);
             }
-            // «Назад к очереди» в рамке не нужна
-            qsa('a', doc).forEach((a) => { if (/Назад к очереди/.test(a.textContent)) a.style.display = 'none'; });
 
             // убрать лишнее, свернуть историю, поставить свои кнопки — и повторять после перерисовок React
             const ctx = { href };
@@ -534,8 +558,6 @@
                         markDone(path);
                     }
                 }
-                // скрытая ссылка «Назад» могла перерисоваться
-                qsa('a', iframe.contentDocument).forEach((a) => { if (/Назад к очереди/.test(a.textContent)) a.style.display = 'none'; });
             }, 700);
         };
         iframe.addEventListener('load', onLoad);
@@ -825,8 +847,9 @@
 
     function enhanceQueue() {
         if (location.pathname !== '/moderation') return;
-        const content = qs('main > div.rounded-\\[20px\\]:not(.fixed)');
         const table = qs('main table');
+        let content = table;
+        while (content && content.parentElement && content.parentElement.tagName !== 'MAIN') content = content.parentElement;
         const statusTabs = qsa('main button').find((b) => b.textContent.trim() === 'Все')?.parentElement?.parentElement;
         if (!content || !table || !statusTabs) return;
         if (qs('.rmq-bar') && qs('.rmq-list')) return; // уже настроено
